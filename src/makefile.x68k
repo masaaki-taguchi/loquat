@@ -1,0 +1,43 @@
+SHELL = command.x
+
+# コマンド定義
+AS = HAS.X
+ASFLAGS = -e -u -w0
+LK = HLK.X
+LKFLAGS = -x
+CV = CV.X
+
+# *.o オブジェクトファイル
+OBJS = LOQUAT.o HISTORY.o LINE_TABLE.o SEARCH.o TEXT.o KEY.o WINDOW.o RASTER_COPY.o FLOAT.o
+
+# プログラム名(拡張子除く)
+PROG = ..\LOQUAT
+
+all : $(PROG).R
+
+# 中間生成物の削除
+clean :
+	-del $(PROG).R
+	-$(foreach obj,$(OBJS),$(shell del $(obj) > NUL))
+
+# リンク実行
+$(PROG).R:	$(OBJS)
+		$(LK) $(LKFLAGS) $(OBJS) -o $(PROG).X
+		$(CV) $(PROG).X
+		del $(PROG).X
+		ren $(PROG).r $(PROG).R
+
+# アセンブル実行
+%.o: %.HAS
+		$(AS)	$(ASFLAGS)	$<
+
+LOQUAT.o:	LOQUAT.HAS LOQUAT.MAC
+HISTORY.o:	HISTORY.HAS LOQUAT.MAC
+LINE_TABLE.o:	LINE_TABLE.HAS LOQUAT.MAC
+SEARCH.o:	SEARCH.HAS LOQUAT.MAC
+TEXT.o:	TEXT.HAS LOQUAT.MAC
+KEY.o:		KEY.HAS LOQUAT.MAC
+WINDOW.o:	WINDOW.HAS LOQUAT.MAC
+RASTER_COPY.o:	RASTER_COPY.HAS
+FLOAT.o:	FLOAT.HAS
+

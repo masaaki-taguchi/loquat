@@ -1,0 +1,110 @@
+*
+*	ウインドウ関係のルーチン 'WINDOW.HAS'
+*
+
+	.include	iocscall.mac
+	.include	doscall.mac
+	.include	loquat.mac
+
+WINDOW_X1	equ	128-8		*文字入力ウインドウのパラメータ
+WINDOW_Y1	equ	15*16-8
+WINDOW_X2	equ	512+8+8
+WINDOW_Y2	equ	16+8+8
+
+	.xref	display_text_color
+	.xref	raster_copy
+	.xref	raster_copy_stop
+	.xdef	display_window
+	.xdef	hide_window
+
+
+*-----------------------------------------------
+*
+*	文字入力ウインドウ表示
+*
+*	in : a2.l = 表示する文字列のアドレス
+*
+*-----------------------------------------------
+display_window:
+	movem.l	d0-d1/a0-a2,-(sp)
+	move.w	$e8002a,-(sp)
+	move.w	#$0133,$e8002a
+
+	bsr	copy_window
+	lea.l	box_parameter(a6),a1
+	clr.w	(a1)
+	move.w	#WINDOW_X1,2(a1)	*パラメータ初期化
+	move.w	#WINDOW_Y1,4(a1)
+	move.w	#WINDOW_X2,6(a1)
+	move.w	#WINDOW_Y2,8(a1)
+	clr.w	10(a1)
+	IOCS	_TXFILL			*ウインドウの領域をクリア
+
+	move.w	#$0111,$e8002a
+	move.w	#$ffff,10(a1)
+	moveq.l	#2-1,d1
+@@:	IOCS	_TXBOX			*ウインドウの枠を描く
+	addq.w	#1,2(a1)
+	addq.w	#1,4(a1)
+	subq.w	#2,6(a1)
+	subq.w	#2,8(a1)
+	dbra	d1,@b
+	move.w	(sp)+,$e8002a
+
+	moveq.l	#3,d0
+	moveq.l	#0,d1
+	lea.l	$e00000+2048*(16-1)+16,a0
+	move.l	a2,a1
+	bsr	display_text_color
+
+	move.l	a0,d0
+	andi.l	#$7f,d0
+	move.w	#16-1,-(sp)
+	move.w	d0,-(sp)
+	move.w	#3,-(sp)
+	DOS	_CONCTRL		*カーソル移動
+	addq.l	#6,sp
+
+	movem.l	(sp)+,d0-d1/a0-a2
+	rts
+
+
+*-----------------------------------------------
+*
+*	ウインドウの部分のテキストを別のラスタへ
+*
+*-----------------------------------------------
+copy_window:
+	movem.l	d0-d1,-(sp)
+	move.w	$e8002a,-(sp)
+	move.w	#$0133,$e8002a
+	move.w	#(WINDOW_Y1/4)<<8|$94,d0
+	move.w	d0,window_raster(a6)
+	move.w	#(WINDOW_Y2/4)-1,d1
+	move.w	d1,window_size(a6)
+	bsr	raster_copy
+	bsr	raster_copy_stop
+	move.w	(sp)+,$e8002a
+	movem.l	(sp)+,d0-d1
+	rts
+
+
+*-----------------------------------------------
+*
+*	前のテキストへ戻す
+*
+*-----------------------------------------------
+hide_window:
+	movem.l	d0-d1,-(sp)
+	move.w	$e8002a,-(sp)
+	move.w	#$0133,$e8002a
+	move.w	window_raster(a6),d0
+	ror.w	#8,d0
+	move.w	window_size(a6),d1
+	bsr	raster_copy
+	bsr	raster_copy_stop
+	move.w	(sp)+,$e8002a
+	movem.l	(sp)+,d0-d1
+	rts
+
+

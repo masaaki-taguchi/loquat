@@ -1,0 +1,338 @@
+*
+*	文字列検索関係ルーチン 'SEARCH.HAS'
+*
+
+	.include	loquat.mac
+
+	.xdef	search_front
+	.xdef	search_back
+	.xdef	get_line
+
+
+*-----------------------------------------------
+*
+*	文字列前方検索
+*
+*	in : a0.l = 検索するパターン先頭アドレス
+*	in : a1.l = 検索を開始するテキストアドレス
+*	out: d0.l = 負ならば検索失敗
+*	out: a0.l = 一致したテキスト先頭アドレス
+*	out: a1.l = 次の検索開始テキストアドレス
+*
+*-----------------------------------------------
+search_front:
+	movem.l	d1-d7/a2-a4,-(sp)
+	moveq.l #0,d2
+	moveq.l #0,d4
+	moveq.l #0,d5
+	move.b	(a0)+,d2
+	beq	string_no_match_front
+	spl.b	d3			*d3=半角チェックフラグ
+	cmpi.b	#$a0,d2
+	bcs	@f
+	cmpi.b	#$e0,d2
+	scs.b	d3
+@@:	move.l	file_point(a6),d1
+	add.l	file_size(a6),d1
+	sub.l	a1,d1			*検索サイズ
+	beq	string_no_match_front
+	subq.l	#1,d1
+	lea.l ascii_table(pc),a4
+	move.b	(a4,d2.w),d6
+	beq	search_front_not_alphabet
+
+search_front_alphabet:
+	move.b	(a1)+,d5		*英字の検索
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+search_front_alphabet_loop_entry:
+	dbeq	d1,search_front_alphabet
+	beq	@f
+	clr.w	d1
+	subq.l	#1,d1
+	bcc	search_front_alphabet
+	bra	string_no_match_front
+@@:	movea.l	a0,a2				*先頭文字が一致
+	movea.l	a1,a3
+@@:	move.b	(a2)+,d4
+	beq	search_front_alphabet_match	*全文字一致した
+	move.b	(a3)+,d5
+	cmp.b	d5,d4
+	beq	@b
+	move.b	(a4,d4.w),d6
+	beq	@f
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+	beq	@b
+@@:	move.b	(a4,d2.w),d6
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_front_alphabet_loop_entry
+search_front_alphabet_match:
+	tst.b	d3
+	beq	@f
+	lea.l	-1(a1),a2
+	bsr	hankaku_check
+	beq	@f
+	move.b	(a4,d2.w),d6
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_front_alphabet_loop_entry
+@@:	lea.l	-1(a1),a0
+	movea.l	a3,a1
+	moveq.l	#0,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+search_front_not_alphabet:
+	move.b	(a1)+,d5		*英字以外の検索
+	cmp.b	d5,d2
+search_front_not_alphabet_loop_entry:
+	dbeq	d1,search_front_not_alphabet
+	beq	@f
+	clr.w	d1
+	subq.l	#1,d1
+	bcc	search_front_not_alphabet
+	bra	string_no_match_front
+@@:	movea.l	a0,a2				*先頭文字が一致
+	movea.l	a1,a3
+@@:	move.b	(a2)+,d4
+	beq	search_front_not_alphabet_match	*全文字一致した
+	move.b	(a3)+,d5
+	cmp.b	d5,d4
+	beq	@b
+	move.b	(a4,d4.w),d6
+	beq	@f
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+	beq	@b
+@@:	moveq.l	#-1,d0			*CCR N=1
+	bra	search_front_not_alphabet_loop_entry
+search_front_not_alphabet_match:
+	tst.b	d3
+	beq	@f
+	lea.l	-1(a1),a2
+	bsr	hankaku_check
+	beq	@f
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_front_not_alphabet_loop_entry
+@@:	lea.l	-1(a1),a0
+	movea.l	a3,a1
+	moveq.l	#0,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+string_no_match_front:
+	moveq.l	#-1,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+
+*-----------------------------------------------
+*
+*	文字列後方検索
+*
+*	in : a0.l = 検索するパターン先頭アドレス
+*	in : a1.l = 検索を開始するテキストアドレス
+*	out: d0.l = 負ならば検索失敗
+*	out: a0.l = 一致したテキスト先頭アドレス
+*	out: a1.l = 次の検索開始テキストアドレス
+*
+*-----------------------------------------------
+search_back:
+	movem.l	d1-d7/a2-a4,-(sp)
+	moveq.l #0,d2
+	moveq.l #0,d4
+	moveq.l #0,d5
+	move.b	(a0)+,d2
+	beq	string_no_match_back
+	spl.b	d3			*d3=半角チェックフラグ
+	cmpi.b	#$a0,d2
+	bcs	@f
+	cmpi.b	#$e0,d2
+	scs.b	d3
+@@:	move.l	a1,d1
+	sub.l	file_point(a6),d1	*検索サイズ
+	beq	string_no_match_back
+	subq.l	#1,d1
+	lea.l ascii_table(pc),a4
+	move.b	(a4,d2.w),d6
+	beq	search_back_not_alphabet
+
+search_back_alphabet:
+	move.b	-(a1),d5		*英字の検索
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+search_back_alphabet_loop_entry:
+	dbeq	d1,search_back_alphabet
+	beq	@f
+	clr.w	d1
+	subq.l	#1,d1
+	bcc	search_back_alphabet
+	bra	string_no_match_back
+@@:	movea.l	a0,a2				*先頭文字が一致
+	movea.l	a1,a3
+	addq.l	#1,a3
+@@:	move.b	(a2)+,d4
+	beq	search_back_alphabet_match	*全文字一致した
+	move.b	(a3)+,d5
+	cmp.b	d5,d4
+	beq	@b
+	move.b	(a4,d4.w),d6
+	beq	@f
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+	beq	@b
+@@:	move.b	(a4,d2.w),d6
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_back_alphabet_loop_entry
+search_back_alphabet_match:
+	tst.b	d3
+	beq	@f
+	movea.l	a1,a2
+	bsr	hankaku_check
+	beq	@f
+	move.b	(a4,d2.w),d6
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_back_alphabet_loop_entry
+@@:	movea.l	a1,a0
+	movea.l	a3,a1
+	moveq.l	#0,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+search_back_not_alphabet:
+	move.b	-(a1),d5		*英字以外の検索
+	cmp.b	d5,d2
+search_back_not_alphabet_loop_entry:
+	dbeq	d1,search_back_not_alphabet
+	beq	@f
+	clr.w	d1
+	subq.l	#1,d1
+	bcc	search_back_not_alphabet
+	bra	string_no_match_back
+@@:	movea.l	a0,a2				*先頭文字が一致
+	movea.l	a1,a3
+	addq.l	#1,a3
+@@:	move.b	(a2)+,d4
+	beq	search_back_not_alphabet_match	*全文字一致した
+	move.b	(a3)+,d5
+	cmp.b	d5,d4
+	beq	@b
+	move.b	(a4,d4.w),d6
+	beq	@f
+	move.b	(a4,d5.w),d7
+	cmp.b	d6,d7
+	beq	@b
+@@:	moveq.l	#-1,d0			*CCR N=1
+	bra	search_back_not_alphabet_loop_entry
+search_back_not_alphabet_match:
+	tst.b	d3
+	beq	@f
+	movea.l	a1,a2
+	bsr	hankaku_check
+	beq	@f
+	moveq.l	#-1,d0			*CCR N=1
+	bra	search_back_not_alphabet_loop_entry
+@@:	movea.l	a1,a0
+	movea.l	a3,a1
+	moveq.l	#0,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+string_no_match_back:
+	moveq.l	#-1,d0
+	movem.l	(sp)+,d1-d7/a2-a4
+	rts
+
+* 半角英文字の大文字/小文字の区別無しの検索するためのASCIIコードテーブル
+ascii_table:
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$00～$0f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$10～$1f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$20～$2f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$30～$3f
+	dc.b	0,'ABCDEFGHIJKLMNO'		*$40～$4f
+	dc.b	'PQRSTUVWXYZ',0,0,0,0,0		*$50～$5f
+	dc.b	0,'ABCDEFGHIJKLMNO'		*$60～$6f
+	dc.b	'PQRSTUVWXYZ',0,0,0,0,0		*$70～$7f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$80～$8f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$90～$9f
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$a0～$af
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$b0～$bf
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$c0～$cf
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$d0～$df
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$e0～$ef
+	dc.b	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0	*$f0～$ff
+
+
+*-----------------------------------------------
+*
+*	半角文字チェック
+*
+*	in : a2.l = チェックを開始するアドレス
+*	out: d0.l = 負ならば失敗
+*
+*-----------------------------------------------
+hankaku_check:
+	move.l	a2,d4
+	move.l	a2,d5			*奇数偶数判定用
+	sub.l	file_point(a6),d4
+	beq	hankaku_check_exit	*0なら問題なし
+	subq.l	#1,d4
+hankaku_check_loop:
+	move.b	-(a2),d0
+	bpl	hankaku_odd_check
+	cmpi.b	#$e0,d0
+	bcc	@f
+	cmpi.b	#$a0,d0
+	bcc	hankaku_odd_check
+@@:	dbra	d4,hankaku_check_loop
+	clr.w	d4
+	subq.l	#1,d4
+	bcc	hankaku_check_loop
+	bra	@f
+hankaku_odd_check:
+	sub.l	a2,d5
+	btst.l	#0,d5
+	bne	hankaku_check_exit
+@@:	moveq.l	#-1,d0
+	rts
+hankaku_check_exit:
+	moveq.l	#0,d0
+	rts
+
+
+*-----------------------------------------------
+*
+*	テキストのアドレスから行数を得る
+*
+*	in : a0.l = 行数を調べたいテキストアドレス
+*	out: d0.l = 得た行数
+*
+*-----------------------------------------------
+get_line:
+	movem.l	d1-d3/a0-a1,-(sp)
+	moveq.l	#0,d0
+	move.l	line_limit(a6),d1
+	beq	get_line_exit
+	moveq.l	#0,d2			*d2=0bitフラグ
+	movea.l	line_point(a6),a1
+get_line_loop:
+	tst.l	d1
+	beq	get_line_exit
+	lsr.l	#1,d1
+	scs.b	d2
+	andi.b	#$1,d2
+	move.l	d0,d3
+	add.l	d1,d3
+	add.l	d2,d3
+	lsl.l	#2,d3
+	move.l	(a1,d3.l),d3
+	cmpa.l	d3,a0
+	bcs	get_line_loop
+	add.l	d2,d0
+	add.l	d1,d0
+	bra	get_line_loop
+get_line_exit:
+	movem.l	(sp)+,d1-d3/a0-a1
+	rts
+
+

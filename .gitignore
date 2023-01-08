@@ -1,0 +1,4 @@
+src/_build/
+src/*.o
+backup/
+LOQUAT.X

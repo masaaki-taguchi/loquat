@@ -1,0 +1,126 @@
+*
+*	数値変換処理ルーチン 'FLOAT.HAS'
+*
+
+	.xdef	LTOS
+	.xdef	STOH
+	.xdef	STOL
+
+
+*-----------------------------------------------
+*
+*	符号無し 10進数文字列変換
+*
+*	in : d0.l = 変換したい数値
+*	in : a0.l = 書き込むバッファアドレス
+*
+*-----------------------------------------------
+LTOS:
+	movem.l	d1-d3/a0-a1,-(sp)
+	lea.l	table_l(pc),a1
+	moveq.l	#9-1,d1
+soto_loop:
+	move.l	(a1)+,d2
+	moveq.l	#'0',d3
+naka_loop:
+	sub.l	d2,d0
+	bcs	next_column
+	addq.b	#1,d3
+	bra	naka_loop
+next_column:
+	add.l	d2,d0
+	move.b	d3,(a0)+
+	dbra	d1,soto_loop
+
+	addi.b	#'0',d0
+	move.b	d0,(a0)+
+	clr.b	(a0)
+
+	lea.l	-10(a0),a0
+	moveq.l	#9-1,d2
+space_loop:
+	cmpi.b	#'0',(a0)
+	bne	LTOS_exit
+	move.b	#' ',(a0)+
+	dbra	d2,space_loop
+LTOS_exit:
+	movem.l	(sp)+,d1-d3/a0-a1
+	rts
+
+table_l:
+	dc.l	1000000000
+	dc.l	100000000
+	dc.l	10000000
+	dc.l	1000000
+	dc.l	100000
+	dc.l	10000
+	dc.l	1000
+	dc.l	100
+	dc.l	10
+
+
+*-----------------------------------------------
+*
+*	16進数文字列整数変換
+*
+*	in : a0.l = 変換したい文字列
+*	out: d0.l = 変換された数
+*
+*-----------------------------------------------
+STOH:
+	movem.l	d1/a0,-(sp)
+	moveq.l	#0,d0
+	moveq.l	#0,d1
+stoh_loop:
+	move.b	(a0)+,d1
+	beq	stoh_exit
+	lsl.l	#4,d0
+	cmpi.b	#'9',d1
+	bhi	@f
+	sub.b	#'0',d1
+	add.l	d1,d0
+	bra	stoh_loop
+@@:	andi.b	#$df,d1
+	sub.b	#'A'-10,d1
+	add.l	d1,d0
+	bra	stoh_loop
+stoh_exit:
+	movem.l	(sp)+,d1/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	10進数文字列整数変換
+*
+*	in : a0.l = 変換したい文字列
+*	out: d0.l = 変換された数
+*
+*-----------------------------------------------
+STOL:
+	movem.l	d1-d2/a0,-(sp)
+	moveq.l	#0,d0
+	moveq.l	#0,d1
+no_numelic:
+	move.b	(a0)+,d2
+	beq	stol_exit
+	cmpi.b	#' ',d2
+	beq	no_numelic
+	sub.b	#'0',d2
+	move.b	d2,d0
+stol_loop:
+	move.b	(a0),d2
+	beq	stol_exit
+	move.l	d0,d2
+	lsl.l	#3,d0
+	add.l	d2,d2
+	add.l	d2,d0
+	move.b	(a0)+,d1
+	sub.b	#'0',d1
+	add.l	d1,d0
+	bra	stol_loop
+stol_exit:
+	movem.l	(sp)+,d1-d2/a0
+	rts
+
+

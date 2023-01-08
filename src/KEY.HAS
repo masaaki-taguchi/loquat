@@ -1,0 +1,309 @@
+*
+*	キー関係のルーチン 'KEY.HAS'
+*
+
+	.include	iocscall.mac
+	.include	doscall.mac
+	.include	loquat.mac
+
+	.xref	put_816
+	.xref	put_1616
+	.xdef	key_input
+	.xdef	key_wait
+	.xdef	clear_key_buffer
+	.xdef	cursor_on
+	.xdef	cursor_off
+
+
+*-----------------------------------------------
+*
+*	文字入力
+*
+*	in : d0.w = 文字入力可能な限界数
+*	in : a0.l = 格納するバッファのアドレス
+*	out: d0.w = 入力された文字数
+*
+*-----------------------------------------------
+key_input:
+	movem.l	d1-d7/a0-a6,-(sp)
+	move.l	$e8002a,-(sp)
+	move.w	#$0033,$e8002a
+
+	move.w	d0,d3
+	moveq.l	#0,d4
+	move.l	a0,a1
+	lea.l	hanzen_buffer(a6),a2
+
+	bsr	cursor_on
+	bsr	clear_key_buffer
+key_input_loop:
+	bsr	check_exclude_key
+	tst.l	d0
+	beq	key_input_loop
+key_input_loop_2:
+	bsr	get_key_code
+	tst.l	d0
+	beq	key_input_loop
+	bsr	get_key_code_2
+	cmpi.b	#$08,d0			*BS
+	beq	key_bs
+	cmpi.b	#$09,d0			*TAB
+	beq	key_tab
+	cmpi.b	#$0d,d0			*RET
+	beq	key_input_exit
+	cmpi.b	#$1b,d0			*ESC
+	beq	key_esc
+	cmpi.b	#$20,d0
+	bcs	key_input_loop_2
+	cmpi.b	#$80,d0
+	bcs	key_hankaku
+	cmpi.b	#$a0,d0
+	bcs	key_zenkaku
+	cmpi.b	#$e0,d0
+	bcs	key_hankaku
+key_zenkaku:
+	cmp.w	d3,d4
+	bcc	key_input_loop_2
+	move.b	d0,(a1)+
+	move.b	d0,d1
+	bsr	get_key_code_2
+	move.b	d0,(a1)+
+	lsl.w	#8,d1
+	move.b	d0,d1
+	bsr	cursor_off
+	bsr	get_cursor_address
+	bset.b	#0,$e8002a
+	bsr	put_1616
+	bclr.b	#0,$e8002a
+	bsr	cursor_right
+	bsr	cursor_right
+	bsr	cursor_on
+	addq.w	#2,d4
+	st.b	(a2)+
+	bra	key_input_loop_2
+key_hankaku:
+	cmp.w	d3,d4
+	bcc	key_input_loop_2
+	move.b	d0,d1
+	move.b	d1,(a1)+
+	bsr	cursor_off
+	bsr	get_cursor_address
+	bset.b	#0,$e8002a
+	bsr	put_816
+	bclr.b	#0,$e8002a
+	bsr	cursor_right
+	bsr	cursor_on
+	addq.w	#1,d4
+	clr.b	(a2)+
+	bra	key_input_loop_2
+key_bs:
+	tst.l	d4
+	beq	key_input_loop_2
+	tst.b	-(a2)
+	beq	@f
+	bsr	cursor_off		*全角
+	bsr	cursor_left
+	bsr	cursor_left
+	bsr	get_cursor_address
+	bset.b	#0,$e8002a
+	move.w	#'　',d1
+	bsr	put_1616
+	bclr.b	#0,$e8002a
+	bsr	cursor_on
+	subq.l	#2,a1
+	subq.w	#2,d4
+	bra	key_input_loop_2
+@@:	bsr	cursor_off		*半角
+	bsr	cursor_left
+	bsr	get_cursor_address
+	bset.b	#0,$e8002a
+	move.b	#' ',d1
+	bsr	put_816
+	bclr.b	#0,$e8002a
+	bsr	cursor_on
+	subq.l	#1,a1
+	subq.w	#1,d4
+	bra	key_input_loop_2
+key_tab:
+	moveq.l	#$09,d0
+	bra	key_hankaku
+key_esc:
+	moveq.l	#0,d4
+	bra	key_input_exit
+key_input_exit:
+	tst.w	d4
+	beq	@f
+	clr.b	(a1)
+@@:	bsr	cursor_off
+	bsr	clear_key_buffer
+	move.l	#0,-(sp)
+	move.l	#1,-(sp)
+	DOS	_KNJCTRL		*通常入力モードに戻す
+	addq.l	#8,sp
+	move.w	d4,d0
+	move.l	(sp)+,$e8002a
+	movem.l	(sp)+,d1-d7/a0-a6
+	rts
+
+
+*-----------------------------------------------
+*
+*	不要なキーをチェック
+*
+*-----------------------------------------------
+check_exclude_key:
+	IOCS	_B_KEYSNS
+	tst.l	d0
+	beq	check_exclude_key_exit
+	lsr.l	#8,d0
+	lea.l	exclude_key_table(pc),a0
+exclude_key_loop:
+	move.b	(a0)+,d1
+	bmi	check_exclude_key_exit
+	cmp.b	d0,d1
+	bne	exclude_key_loop
+	bsr	clear_key_buffer
+	moveq.l	#0,d0
+check_exclude_key_exit:
+	rts
+
+exclude_key_table:
+	dc.b	$36,$37,$38,$39,$3a,$3b,$3c,$3d
+	dc.b	$3e,$3f,$54,$5e,$63,$64,$65,$66
+	dc.b	$67,$68,$69,$6a,$6b,$6c
+	dc.b	-1
+	.even
+
+
+*-----------------------------------------------
+*
+*	入力されたキーを先読み
+*
+*	out: d0.b = 文字コード
+*
+*-----------------------------------------------
+get_key_code:
+	move.w	#1,-(sp)
+	DOS	_KEYCTRL
+	addq.l	#2,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	入力されたキーを読みだし
+*
+*	out: d0.b = 文字コード
+*
+*-----------------------------------------------
+get_key_code_2:
+	clr.w	-(sp)
+	DOS	_KEYCTRL
+	addq.l	#2,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	キーバッファをクリア
+*
+*-----------------------------------------------
+clear_key_buffer:
+	clr.w	-(sp)
+	DOS	_KFLUSH
+	addq.l	#2,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	カーソルを表示
+*
+*-----------------------------------------------
+cursor_on:
+	move.w	#17,-(sp)
+	DOS	_CONCTRL
+	addq.l	#2,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	カーソルを非表示
+*
+*-----------------------------------------------
+cursor_off:
+	move.w	#18,-(sp)
+	DOS	_CONCTRL
+	addq.l	#2,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	カーソルを右に移動
+*
+*-----------------------------------------------
+cursor_right:
+	clr.w	-(sp)
+	move.w	#8,-(sp)
+	DOS	_CONCTRL
+	addq.l	#4,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	カーソルを左に移動
+*
+*-----------------------------------------------
+cursor_left:
+	clr.w	-(sp)
+	move.w	#9,-(sp)
+	DOS	_CONCTRL
+	addq.l	#4,sp
+	rts
+
+
+*-----------------------------------------------
+*
+*	カーソルの位置のテキストアドレスを得る
+*
+*	out: a0.l = カーソルのテキストのアドレス
+*
+*-----------------------------------------------
+get_cursor_address:
+	movem.l	d0-d1,-(sp)
+	moveq.l	#-1,d1
+	IOCS	_B_LOCATE
+	move.w	d0,d1
+	swap.w	d0
+	ext.l	d0
+	ext.l	d1
+	lsl.l	#7,d1
+	lsl.l	#4,d1
+	add.l	d0,d1
+	add.l	#$e00000,d1
+	move.l	d1,a0
+	movem.l	(sp)+,d0-d1
+	rts
+
+
+*-----------------------------------------------
+*
+*	キーウエイト
+*
+*	in : d0.w = _BITSNSのアドレス
+*	in : d1.w = ビット番号
+*
+*-----------------------------------------------
+key_wait:
+	movem.l	d0-d1/a0,-(sp)
+	move.w	d0,a0
+key_wait_loop:
+	btst.b	d1,(a0)
+	bne	key_wait_loop
+	movem.l	(sp)+,d0-d1/a0
+	rts
+
+

@@ -1,0 +1,1888 @@
+*
+*	メイン処理 'LOQUAT.HAS'
+*
+
+	.include	iocscall.mac
+	.include	doscall.mac
+	.include	loquat.mac
+
+LOQUAT_VERNUM	equ	$0103
+ED_LINE		equ	14		*エディターを起動するときの行番号修正値
+WAIT_TIME	equ	12		*キーウエイト値
+DEF_HIST_NUM	equ	16-1
+
+	.xref	read_history
+	.xref	write_history
+	.xref	make_line_table
+	.xref	search_front
+	.xref	search_back
+	.xref	get_line
+	.xref	display_text_all
+	.xref	display_text
+	.xref	display_text_color
+	.xref	key_input
+	.xref	key_wait
+	.xref	clear_key_buffer
+	.xref	cursor_on
+	.xref	cursor_off
+	.xref	display_window
+	.xref	hide_window
+	.xref	raster_copy
+	.xref	raster_copy_stop
+	.xref	LTOS
+	.xref	STOH
+	.xref	STOL
+	.xdef	keep_check
+
+
+*-----------------------------------------------
+*
+*	常駐部分
+*
+*-----------------------------------------------
+entrance_keep_part:
+	bra	boot
+	dc.b	'LOQUAT'
+	dc.w	LOQUAT_VERNUM
+	ds.w	1			*現在の検索文字列位置
+	ds.w	1			*次に書き換えられる検索文字列位置
+	ds.w	1			*行番号を記憶するファイル数
+	ds.w	1			*オーバーライトできるバッファ位置
+	ds.l	1			*検索文字列バッファ先頭ポイント
+	ds.l	1			*ラインバッファ先頭ポイント
+exit_keep_part:
+
+
+*-----------------------------------------------
+*
+*	コマンドラインの解析など
+*
+*-----------------------------------------------
+boot:
+	lea.l	a0_work(pc),a3
+	move.l	a0,(a3)
+
+	lea.l	$10(a0),a0
+	suba.l	a0,a1
+	move.l	a1,-(sp)
+	move.l	a0,-(sp)
+	DOS	_SETBLOCK		*最小限のメモリ確保
+	addq.l	#8,sp
+
+	move.l	#WORK_SIZE,-(sp)
+	DOS	_MALLOC
+	addq.l	#4,sp
+	tst.l	d0
+	bmi	error_memory
+	movea.l	d0,a6			*a6は破壊禁止
+	lea.l	work_point(pc),a0
+	move.l	d0,(a0)
+
+	move.l	d0,a0			*確保したワークメモリをクリア
+	move.w	#WORK_SIZE/2-1,d0
+@@:	clr.w	(a0)+
+	dbra	d0,@b
+
+	DOS	_VERNUM
+	cmpi.w	#$0203,d0
+	sls.b	human_flag(a6)
+
+	bsr	to_super_mode
+
+	tst.b	(a2)+
+	beq	help
+switch_loop:
+	move.b	(a2)+,d0
+	beq	check_keep_switch
+	cmpi.b	#' ',d0
+	beq	switch_loop
+	cmpi.b	#$09,d0
+	beq	switch_loop
+	cmpi.b	#'-',d0
+	beq	@f
+	cmpi.b	#'/',d0
+	beq	@f
+	subq.l	#1,a2
+	bra	loquat_start
+@@:	move.b	(a2)+,d0
+	beq	help
+	andi.b	#$df,d0
+	cmpi.b	#'P',d0
+	beq	get_user_palette
+	cmpi.b	#'N',d0
+	beq	get_user_line
+	cmpi.b	#'L',d0
+	beq	set_keep_switch_flag
+	cmpi.b	#'R',d0
+	beq	process_leave
+	cmpi.b	#'F',d0
+	beq	get_user_hist_file
+	cmpi.b	#'I',d0
+	beq	init_history_buffer
+	bra	help
+check_keep_switch:
+	tst.w	keep_switch_flag(a6)
+	bne	process_keep
+	bra	help
+
+get_user_palette:
+	tst.b	(a2)
+	beq	help
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a2)+,d0
+	cmpi.b	#' ',d0
+	beq	@f
+	move.b	d0,(a0)+
+	bra	@b
+@@:	clr.b	(a0)
+	lea.l	etc_buffer(a6),a0
+	bsr	analyze_palette_word
+	bmi	help
+	st.b	user_palette_flag(a6)
+	bra	switch_loop
+
+analyze_palette_word:
+	lea.l	user_palette_buffer(a6),a3
+	bsr	palette_word_henkan
+	bmi	@f
+	cmpi.b	#',',(a0)+
+	bne	@f
+	move.w	d0,(a3)+
+	bsr	palette_word_henkan
+	bmi	@f
+	cmpi.b	#',',(a0)+
+	bne	@f
+	move.w	d0,(a3)+
+	bsr	palette_word_henkan
+	bmi	@f
+	cmpi.b	#',',(a0)+
+	bne	@f
+	move.w	d0,(a3)+
+	bsr	palette_word_henkan
+	bmi	@f
+	tst.b	(a0)
+	bne	@f
+	move.w	d0,(a3)
+	moveq.l	#0,d0
+	rts
+@@:	moveq.l	#-1,d0
+	rts
+
+palette_word_henkan:
+	lea.l	etc_buffer_2(a6),a1
+	moveq.l	#4-1,d0
+@@:	move.b	(a0)+,d1
+	cmpi.b	#'0',d1			*16進数の文字か調べる
+	bcs	@@f
+	cmpi.b	#'9',d1
+	bls	@f
+	andi.b	#$df,d1
+	cmpi.b	#'A',d1
+	bcs	@@f
+	cmpi.b	#'F',d1
+	bhi	@@f
+@@:	move.b	d1,(a1)+
+	dbra	d0,@@b
+
+	clr.b	(a1)
+	move.l	a0,d1
+	lea.l	etc_buffer_2(a6),a0
+	bsr	STOH
+	move.l	d1,a0
+	moveq.l	#0,d1
+	rts
+@@:	moveq.l	#-1,d1
+	rts
+
+get_user_line:
+	tst.b	(a2)
+	beq	help
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a2)+,d0
+	cmpi.b	#' ',d0
+	beq	@f
+	move.b	d0,(a0)+
+	bra	@b
+@@:	subq.l	#1,a2
+	clr.b	(a0)
+
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a0)+,d0
+	beq	@f
+	cmpi.b	#'0',d0
+	bcs	help
+	cmpi.b	#'9',d0
+	bhi	help
+	bra	@b
+@@:	lea.l	etc_buffer(a6),a0
+	bsr	STOL
+	move.l	d0,user_line(a6)
+	bra	switch_loop
+
+set_keep_switch_flag:
+	st.b	keep_switch_flag(a6)
+	bra	switch_loop
+
+get_user_hist_file:
+	tst.b	(a2)
+	beq	help
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a2)+,d0
+	beq	@f
+	cmpi.b	#' ',d0
+	beq	@f
+	move.b	d0,(a0)+
+	bra	@b
+@@:	subq.l	#1,a2
+	clr.b	(a0)
+
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a0)+,d0
+	beq	@f
+	cmpi.b	#'0',d0
+	bcs	help
+	cmpi.b	#'9',d0
+	bhi	help
+	bra	@b
+@@:	lea.l	etc_buffer(a6),a0
+	bsr	STOL
+	cmpi.l	#1,d0
+	bcs	help
+	cmpi.l	#2048,d0
+	bhi	help
+	subq.w	#1,d0
+	move.w	d0,user_hist_file_number(a6)
+	bra	switch_loop
+
+init_history_buffer:
+	bsr	keep_check
+	bmi	error_naizo
+	lea.l	$100(a0),a0
+
+	clr.w	keep_now_search(a0)
+	clr.w	keep_over_write_search(a0)
+	clr.w	keep_over_write_line(a0)
+
+	movea.l	keep_buffer_point(a0),a1
+	move.w	keep_file_number(a0),d0
+	addq.w	#1,d0
+	mulu.w	#HIST_LINE_SIZE,d0
+	addi.l	#HIST_STR_SIZE,d0
+	lsr.l	#1,d0
+	subq.l	#1,d0
+	moveq.l	#0,d1
+@@:	move.w	d1,(a1)+
+	dbra	d0,@b
+	clr.w	d0
+	subq.l	#1,d0
+	bcc	@b
+
+	pea.l	m_name(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	pea.l	m_init(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+
+	bra	all_exit
+
+
+*-----------------------------------------------
+*
+*	常駐処理
+*
+*-----------------------------------------------
+process_keep:
+	bsr	keep_check
+	beq	error_aruzo
+
+	lea.l	entrance_keep_part(pc),a0
+
+	clr.w	keep_now_search(a0)
+	clr.w	keep_over_write_search(a0)
+	move.w	user_hist_file_number(a6),d1
+	bne	@f
+	move.w	#DEF_HIST_NUM,d1
+@@:	move.w	d1,keep_file_number(a0)
+	clr.w	keep_over_write_line(a0)
+
+	move.l	work_point(pc),-(sp)
+	DOS	_MFREE
+	addq.l	#4,sp
+
+	addq.w	#1,d1
+	mulu.w	#HIST_LINE_SIZE,d1
+	addi.l	#HIST_STR_SIZE,d1
+	move.l	d1,-(sp)
+	DOS	_MALLOC
+	addq.l	#4,sp
+	tst.l	d0
+	bmi	error_memory
+	move.l	d0,keep_buffer_point(a0)
+	move.l	d0,keep_buffer_point_2(a0)
+	addi.l	#HIST_STR_SIZE,keep_buffer_point_2(a0)
+
+	move.l	d0,a0
+	moveq.l	#0,d0
+	lsr.l	#1,d1
+	subq.l	#1,d1
+@@:	move.w	d0,(a0)+		*確保したメモリをクリア
+	dbra	d1,@b
+	clr.w	d1
+	subq.l	#1,d1
+	bcc	@b
+
+	pea.l	m_name(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	pea.l	m_keeppr(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+
+	clr.w	-(sp)
+	move.l	#exit_keep_part-entrance_keep_part,-(sp)
+	DOS	_KEEPPR
+
+
+*-----------------------------------------------
+*
+*	常駐解除
+*
+*-----------------------------------------------
+process_leave:
+	bsr	keep_check
+	bmi	error_naizo
+
+	move.l	$100+keep_buffer_point(a0),-(sp)
+	DOS	_MFREE
+	addq.l	#4,sp
+
+	pea.l	16(a0)
+	DOS	_MFREE
+	addq.l	#4,sp
+
+	pea.l	m_name(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	pea.l	m_leave(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+
+	bra	all_exit
+
+
+*-----------------------------------------------
+*
+*	LOQUAT.Rが常駐しているか調べる
+*
+*	out : d0.l = 負ならば常駐していない
+*	out : a0.l = 見つかったときのプロセスポイント
+*
+*-----------------------------------------------
+keep_check:
+	move.l	a0_work(pc),a0
+@@:	move.l	$0c(a0),d0	*メモリ管理ポインタの終端まで移動
+	beq	keep_check_loop
+	move.l	d0,a0
+	bra	@b
+keep_check_loop:
+	cmpi.b	#$e0,$04(a0)	*常駐プロセスか?
+	bcs	@f
+	move.l	$08(a0),d0
+	lea.l	$100(a0),a1
+	sub.l	a1,d0		*d0=メモリブロックの大きさ
+	cmpi.l	#keep_loquat_header+4+4,d0
+	bcs	@f
+	move.l	$100+keep_loquat_header(a0),d0
+	cmpi.l	#'LOQU',d0
+	bne	@f
+	move.l	$100+keep_loquat_header+4(a0),d0
+	cmpi.l	#'AT'<<16|LOQUAT_VERNUM,d0
+	bne	@f
+	moveq.l	#0,d0
+	bra	keep_check_exit
+@@:	move.l	(a0),d0
+	beq	@f
+	move.l	d0,a0
+	bra	keep_check_loop
+@@:	moveq.l	#-1,d0
+keep_check_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	ここからLOQUAT.Rメイン処理
+*
+*-----------------------------------------------
+loquat_start:
+	bsr	read_file
+	bsr	read_history
+	bsr	font_copy
+	bsr	set_text_palette
+	bsr	make_screen
+	bsr	make_line_table
+	bmi	error_line		*ラインテーブル作成失敗
+	bsr	display_first_page
+	bsr	exit_key_wait
+	bsr	key_check
+	bsr	prep_exit
+	bsr	to_user_mode
+all_exit:
+	DOS	_EXIT
+
+
+*-----------------------------------------------
+*
+*	LOQUAT.Rを終了するときの処理
+*
+*-----------------------------------------------
+prep_exit:
+	bsr	write_history
+
+	bsr	all_text_clear		*全プレーン初期化
+
+	clr.w	-(sp)
+	move.w	#16,-(sp)		*画面モード変更
+	DOS	_CONCTRL
+	addq.l	#4,sp
+
+	clr.w	-(sp)
+	move.w	#14,-(sp)		*ファンクションキー表示
+	DOS	_CONCTRL
+	addq.l	#4,sp
+
+	bsr	cursor_on
+
+	bsr	clear_key_buffer	キーバッファをクリア
+	rts
+
+
+*-----------------------------------------------
+*
+*	テキストファイルを読み込む
+*
+*-----------------------------------------------
+read_file:
+	lea.l	name_buffer(a6),a0
+@@:	move.b	(a2)+,(a0)+		*ファイル名をコピー
+	bne	@b
+
+	clr.w	-(sp)
+	pea.l	name_buffer(a6)
+	DOS	_OPEN
+	addq.l	#6,sp
+	move.l	d0,d1
+	tst.l	d0
+	bmi	error_open_file
+
+	move.w	#2,-(sp)
+	clr.l	-(sp)
+	move.w	d1,-(sp)
+	DOS	_SEEK
+	addq.l	#8,sp
+	move.l	d0,d2
+	move.l	d2,file_size(a6)
+
+	move.w	#0,-(sp)
+	clr.l	-(sp)
+	move.w	d1,-(sp)
+	DOS	_SEEK
+	addq.l	#8,sp
+
+	addq.l	#2,d2			*$1aを書き込むため2byte多く
+	move.l	d2,-(sp)
+	DOS	_MALLOC
+	addq.l	#4,sp
+	tst.l	d0
+	bmi	error_memory
+	move.l	d0,file_point(a6)
+
+	move.l	file_size(a6),-(sp)
+	move.l	d0,-(sp)
+	move.w	d1,-(sp)
+	DOS	_READ
+	lea.l	10(sp),sp
+	tst.l	d0
+	bmi	error_read_file
+
+	move.w	d1,-(sp)
+	DOS	_CLOSE
+	addq.l	#2,sp
+
+	pea.l	nameck_buffer(a6)
+	pea.l	name_buffer(a6)
+	DOS	_NAMECK			*ファイル名だけ調べるため
+	addq.l	#8,sp
+
+	move.l	file_size(a6),d0
+	movea.l	file_point(a6),a0
+	move.b	#$1a,(a0,d0.l)		*安全のため$1aを書き込む
+	move.b	#$1a,1(a0,d0.l)
+	rts
+
+
+*-----------------------------------------------
+*
+*	フォントをバッファへコピーする
+*
+*-----------------------------------------------
+font_copy:
+	movea.l	$400+(_FNTADR*4),a5
+	lea.l	font_816_buffer(a6),a2
+	moveq.l	#0,d3
+	move.w	#256-1,d4
+font_816_loop:
+	move.w	d3,d1
+	moveq.l	#8,d2
+	jsr	(a5)
+	movea.l	d0,a1
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	move.l	(a1)+,(a2)+
+	addq.w	#1,d3
+	dbra	d4,font_816_loop
+
+	lea.l	font_1616_buffer(a6),a1
+	moveq.l	#32,d5
+	move.l	#$8140,d6
+	move.w	#1824-1,d7
+font_1616_loop:
+	move.w	d6,d1
+	moveq.l	#8,d2
+	jsr	(a5)
+	movea.l	d0,a0
+	movem.l	(a0),d0-d4/a2-a4
+	movem.l	d0-d4/a2-a4,(a1)
+	adda.l	d5,a1
+	addq.w	#1,d6
+	dbra	d7,font_1616_loop
+	rts
+
+
+*-----------------------------------------------
+*
+*	パレットの設定等
+*
+*-----------------------------------------------
+set_text_palette:
+	clr.w	-(sp)
+	move.w	#16,-(sp)		*画面モード変更
+	DOS	_CONCTRL
+	addq.l	#4,sp
+
+	move.w	#2,-(sp)
+	move.w	#14,-(sp)		*ファンクションキーを表示しない
+	DOS	_CONCTRL
+	addq.l	#4,sp
+
+	bsr	cursor_off
+
+	tst.w	user_palette_flag(a6)	*既にフラグが立っていたら無視
+	bne	@f
+	lea.l	palette_env_name(pc),a0
+	lea.l	etc_buffer(a6),a1
+	bsr	get_env
+	bmi	@f
+	lea.l	etc_buffer(a6),a0
+	bsr	analyze_palette_word
+	bmi	@f
+	st.b	user_palette_flag(a6)
+
+@@:	lea.l	$e82200,a0
+	tst.w	user_palette_flag(a6)
+	bne	@f
+	move.w	#$2108,(a0)+
+	move.w	#$c7c0,(a0)+
+	move.w	#$6318,(a0)+
+	move.w	#$fffe,(a0)+
+	rts
+@@:	lea.l	user_palette_buffer(a6),a1
+	move.w	(a1)+,(a0)+
+	move.w	(a1)+,(a0)+
+	move.w	(a1)+,(a0)+
+	move.w	(a1)+,(a0)+
+	rts
+
+
+*-----------------------------------------------
+*
+*	画面の色々な部分を作る
+*
+*-----------------------------------------------
+make_screen:
+	bclr.b	#5,$e82601		*テキスト表示禁止
+
+	bsr	all_text_clear		*全テキストをクリア
+
+	moveq.l	#$ff,d0			*d0=$ffffffff
+	moveq.l	#$ff,d1
+	moveq.l	#$ff,d2
+	moveq.l	#$ff,d3
+	moveq.l	#$ff,d4
+	moveq.l	#$ff,d5
+	moveq.l	#$ff,d6
+	move.l	d0,a1
+	lea.l	$e20000,a0
+	moveq.l	#4-1,d7
+@@:	movem.l	d0-d6/a1,(a0)		*4line分作成
+	movem.l	d0-d6/a1,32(a0)
+	movem.l	d0-d6/a1,64(a0)
+	lea.l	128(a0),a0
+	dbra	d7,@b
+
+	move.w	$e8002a,-(sp)
+	move.w	#$0002,$e8002a
+	move.w	#$00_01,d0
+	moveq.l	#3-1,d1
+	bsr	raster_copy
+	move.w	#$00_7c,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	move.w	#$0003,$e8002a
+	move.w	#$00_90,d0		*初期化用
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	bsr	raster_copy_stop
+	move.w	(sp)+,$e8002a
+
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e00002,a0
+	lea.l	m_loquat(pc),a1
+	bsr	display_text_color
+
+	lea.l	nameck_buffer+67(a6),a0
+	lea.l	m_bar_file+3(pc),a1
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+	subq.l	#1,a1
+	lea.l	nameck_buffer+86(a6),a0
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+	move.b	#' ',-1(a1)		*end_codeを消す
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0001a,a0
+	lea.l	m_bar_file(pc),a1
+	bsr	display_text_color
+
+	move.l	file_size(a6),d0
+	lea.l	etc_buffer(a6),a0
+	bsr	LTOS
+	lea.l	etc_buffer(a6),a0
+@@:	move.b	(a0)+,d0
+	cmpi.b	#' ',d0
+	beq	@b
+	subq.l	#1,a0
+	lea.l	m_bar_size+9(pc),a1
+	moveq.l	#10-1,d0
+@@:	move.b	(a0)+,(a1)+
+	dbra	d0,@b
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e00039,a0
+	lea.l	m_bar_size(pc),a1
+	bsr	display_text_color
+
+	st.b	redraw_search_flag(a6)
+	bsr	redraw_search_string
+
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e00051,a0
+	lea.l	m_wait(pc),a1
+	bsr	display_text_color
+
+	bset.b	#5,$e82601		*テキスト表示
+	rts
+
+
+*-----------------------------------------------
+*
+*	１画面表示
+*
+*-----------------------------------------------
+display_first_page:
+	bsr	display_max_line
+	move.l	user_line(a6),d0
+	beq	@f
+	subq.l	#1,d0
+	bra	set_first_line
+@@:	move.l	hist_line(a6),d0
+	beq	skip_set_first_line
+set_first_line:
+	move.l	line_limit(a6),d1
+	subi.l	#30-1,d1
+	bpl	@f
+	moveq.l	#0,d1
+@@:	cmp.l	d1,d0
+	bls	@f
+	move.l	d1,d0
+@@:	move.l	d0,now_line(a6)
+skip_set_first_line:
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+	bsr	scroll_sub
+	rts
+
+
+*-----------------------------------------------
+*
+*	行数を表示
+*
+*-----------------------------------------------
+display_max_line:
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0004e,a0
+	lea.l	m_line(pc),a1
+	bsr	display_text_color
+
+	move.l	line_limit(a6),d0
+	addq.l	#1,d0
+	lea.l	etc_buffer(a6),a0
+	bsr	LTOS
+	lea.l	5(a0),a0
+	lea.l	m_line_2(pc),a1
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0005a,a0
+	lea.l	m_line_2(pc),a1
+	bsr	display_text_color		*限界の行数を表示
+	rts
+
+
+*-----------------------------------------------
+*
+*	キーをチェックしルーチンを実行
+*
+*-----------------------------------------------
+key_check:
+	lea.l	key_table-14(pc),a0
+key_check_loop:
+	lea.l	14(a0),a0		*次のキーデータのアドレスへ
+	move.l	a0,key_point(a6)
+	tst.w	(a0)
+	bmi	key_check
+	bsr	key_check_sub
+	bmi	key_check_loop
+	bsr	redraw_search_string
+	bsr	exec_command
+	movea.l	key_point(a6),a0
+	move.w	12(a0),d0
+	beq	key_check		*ウエイトがない
+	subq.w	#1,d0
+key_check_wait:
+	bsr	key_check_sub
+	bmi	key_check
+	btst.b	#4,$e88001
+	beq	key_check_wait
+@@:	btst.b	#4,$e88001
+	bne	@b
+	dbra	d0,key_check_wait	*ウエイト分ループする
+exec_command_loop:
+	movea.l	key_point(a6),a0
+	bsr	key_check_sub
+	bmi	key_check
+	bsr	exec_command
+	bra	exec_command_loop	*キーが離されるまでループ
+key_check_exit:
+	addq.l	#4,sp
+	rts
+
+key_check_sub:
+	movem.l	d0-d2/a1,-(sp)
+	move.w	(a0),d2
+	move.w	4(a0),a1		*IOCS _BITSNSのキーワークアドレス
+	move.w	6(a0),d1		*調べるビット番号
+	btst.b	d1,(a1)
+	beq	@@f
+	tst.w	8(a0)
+	beq	@f
+	move.w	8(a0),a1
+	move.w	10(a0),d1
+	btst.b	d1,(a1)
+	beq	@f
+	move.w	2(a0),d2
+@@:	move.w	d2,key_command_work(a6)
+	moveq.l	#0,d0
+	bra	@@f
+@@:	moveq.l	#-1,d0
+@@:	movem.l	(sp)+,d0-d2/a1
+	rts
+
+exec_command:
+	move.w	key_command_work(a6),d0
+	add.w	d0,d0
+	lea.l	command_table(pc),a1
+	move.w	(a1,d0.w),d0
+	jmp	(a1,d0.w)
+
+
+*-----------------------------------------------
+*
+*	キーテーブル
+*
+*	 0.w	コマンド番号1(-1ならテーブル終端)
+*	 2.w	コマンド番号2
+*	 4.w	キーアドレス 1
+*	 6.w	キービット番号 1
+*	 8.w	キーアドレス 2(0なら調べない)
+*	10.w	キービット番号 2
+*	12.w	ウエイト時間(0ならウエイトなし)
+*
+*-----------------------------------------------
+key_table:
+	dc.w	0,0,$800,1,0,0,0		*ESC
+	dc.w	0,0,$803,5,0,0,0		*RETURN
+	dc.w	0,0,$807,2,0,0,0		*UNDO
+	dc.w	1,0,$807,4,0,0,0		*↑
+	dc.w	2,0,$807,6,0,0,0		*↓
+	dc.w	3,0,$807,3,0,0,0		*←
+	dc.w	4,0,$807,5,0,0,0		*→
+	dc.w	5,0,$807,0,0,0,WAIT_TIME	*ROLL UP
+	dc.w	6,0,$807,1,0,0,WAIT_TIME	*ROLL DOWN
+	dc.w	7,0,$806,6,0,0,0		*HOME
+	dc.w	8,0,$806,7,0,0,0		*DEL
+	dc.w	7,0,$80c,3,0,0,0		*F1
+	dc.w	8,0,$80c,4,0,0,0		*F2
+	dc.w	9,11,$80c,6,$80e,0,0		*F4,SHIFT+F4
+	dc.w	10,12,$80c,7,$80e,0,WAIT_TIME	*F5,SHIFT+F5
+	dc.w	11,0,$80d,0,0,0,0		*F6
+	dc.w	12,0,$80d,1,0,0,WAIT_TIME	*F7
+	dc.w	13,0,$80d,4,0,0,0		*F10
+	dc.w	14,0,$802,3,0,0,0		*E
+	dc.w	-1				*key table end
+
+command_table:
+@@:	dc.w	key_check_exit-@b		*0
+	dc.w	scroll_up_fast-@b		*1
+	dc.w	scroll_down_fast-@b		*2
+	dc.w	scroll_up_slow-@b		*3
+	dc.w	scroll_down_slow-@b		*4
+	dc.w	next_page-@b			*5
+	dc.w	back_page-@b			*6
+	dc.w	top_page-@b			*7
+	dc.w	last_page-@b			*8
+	dc.w	new_search_front-@b		*9
+	dc.w	next_search_front-@b		*10
+	dc.w	new_search_back-@b		*11
+	dc.w	next_search_back-@b		*12
+	dc.w	set_line_num-@b			*13
+	dc.w	exec_editor-@b			*14
+
+
+*-----------------------------------------------
+*
+*	スクロール毎にする処理
+*
+*-----------------------------------------------
+scroll_sub:
+	bsr	print_line
+	tst.b	next_search_flag(a6)
+	beq	@f
+	move.l	found_line(a6),d0
+	sub.l	now_line(a6),d0
+	cmpi.l	#30-1,d0
+	bls	@f			*検索文字列が画面内にあった
+	sf.b	next_search_flag(a6)
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	現在の行数を表示
+*
+*-----------------------------------------------
+print_line:
+	move.l	now_line(a6),d0
+	addq.l	#1,d0			*1行から始まるように見せる
+	lea.l	etc_buffer(a6),a0
+	bsr	LTOS			*10進数整数文字列変換
+	addq.l	#5,a0
+	lea.l	m_line_2(pc),a1
+	move.b	(a0)+,(a1)+		*表示ワークへコピー
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	move.b	(a0)+,(a1)+
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e00054,a0
+	lea.l	m_line_2(pc),a1
+	bsr	display_text_color		*line数を表示
+	rts
+
+
+*-----------------------------------------------
+*
+*	上へ高速スクロール
+*
+*-----------------------------------------------
+scroll_up_fast:
+	move.w	$e8002a,-(sp)
+	move.w	#$0003,$e8002a
+	tst.l	now_line(a6)
+	beq	scroll_up_fast_exit
+	bsr	line_write_up
+
+	bsr	vdisp_loop
+	move.w	#$04_84,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	move.w	#$80_04,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+
+	move.w	#$08_88,d2
+	move.w	#$84_08,d3
+	moveq.l	#30-1-1,d4
+@@:	move.w	d2,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	move.w	d3,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	eori.b	#$0c,d2			*ラスタコピー位置入れ替え
+	eori.w	#$0c_00,d3
+	addi.w	#$04_00,d2		*次のラスタコピー位置へ
+	addq.b	#4,d3
+	dbra	d4,@b
+	bsr	raster_copy_stop
+	bsr	scroll_sub
+scroll_up_fast_exit:
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	上へ低速スクロール
+*
+*-----------------------------------------------
+scroll_up_slow:
+	move.w	$e8002a,-(sp)
+	move.w	#$0003,$e8002a
+	tst.l	now_line(a6)
+	beq	scroll_up_slow_exit
+	bsr	line_write_up
+	move.w	#$83_04,d4
+	moveq.l	#4-1,d6
+scroll_up_slow_loop:
+	bsr	vdisp_loop
+	move.w	#$04_84,d0
+	moveq.l	#1-1,d1
+	bsr	raster_copy
+	move.w	d4,d0
+	moveq.l	#1-1,d1
+	bsr	raster_copy
+	subi.w	#$0100,d4
+
+	move.w	#$05_88,d2
+	move.w	#$84_05,d3
+	move.w	#30*4-1-1,d5
+@@:	move.w	d2,d0
+	moveq.l	#1-1,d1
+	bsr	raster_copy
+	move.w	d3,d0
+	moveq.l	#1-1,d1
+	bsr	raster_copy
+	eori.b	#$0c,d2
+	eori.w	#$0c_00,d3
+	addi.w	#$01_00,d2
+	addq.b	#1,d3
+	dbra	d5,@b
+	dbra	d6,scroll_up_slow_loop
+	bsr	raster_copy_stop
+	bsr	scroll_sub
+scroll_up_slow_exit:
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	上スクロール用の文字列を書き出すルーチン
+*
+*	in : a0.l = 書き込みテキストアドレス
+*
+*-----------------------------------------------
+line_write_up:
+	movea.l	line_point(a6),a1
+	subq.l	#1,now_line(a6)		*1行減らす
+	move.l	now_line(a6),d0
+	lsl.l	#2,d0
+	lea.l	$e10000,a0
+	movea.l	(a1,d0.l),a1
+	moveq.l	#1-1,d0
+	bsr	display_text
+	sf.b	bottom_page_flag(a6)	*下へのスクロールのフラグ
+	rts
+
+
+*-----------------------------------------------
+*
+*	下へ高速スクロール
+*
+*-----------------------------------------------
+scroll_down_fast:
+	move.w	$e8002a,-(sp)
+	move.w	#$0003,$e8002a
+	tst.b	bottom_page_flag(a6)
+	bne	@f
+	bsr	line_write_down
+	bsr	vdisp_loop
+	move.w	#$08_04,d0
+	move.w	#30*4-1-4,d1
+	bsr	raster_copy
+	andi.w	#$00ff,d0
+	ori.w	#$8000,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	bsr	raster_copy_stop
+	bsr	scroll_sub
+@@:	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	下へ低速スクロール
+*
+*-----------------------------------------------
+scroll_down_slow:
+	move.w	$e8002a,-(sp)
+	move.w	#$0003,$e8002a
+	tst.b	bottom_page_flag(a6)
+	bne	scroll_down_slow_exit
+	bsr	line_write_down
+	move.w	#$8000,d2
+	moveq.l	#4-1,d3
+@@:	bsr	vdisp_loop
+	move.w	#$05_04,d0
+	move.w	#30*4-1-1,d1
+	bsr	raster_copy
+	ext.w	d0			*d0は負にはならないはず
+	or.w	d2,d0
+	moveq.l	#1-1,d1
+	bsr	raster_copy
+	addi.w	#$0100,d2
+	dbra	d3,@b
+	bsr	raster_copy_stop
+	bsr	scroll_sub
+scroll_down_slow_exit:
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	下スクロール用の文字列を書き出すルーチン
+*
+*-----------------------------------------------
+line_write_down:
+	move.l	now_line(a6),d0
+	addq.l	#1,now_line(a6)		*1行進む
+	addi.l	#30,d0			*30行先の文字列を表示
+	lsl.l	#2,d0
+	lea.l	$e10000,a0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	moveq.l	#1-1,d0
+	bsr	display_text
+	rts
+
+
+*-----------------------------------------------
+*
+*	下へ1画面スクロール
+*
+*-----------------------------------------------
+next_page:
+	tst.b	bottom_page_flag(a6)
+	bne	@f
+	move.l	now_line(a6),d0
+	move.l	line_limit(a6),d1
+	sub.l	d0,d1
+	cmpi.l	#30*2,d1
+	bcs	last_page
+	addi.l	#30,d0
+	move.l	d0,now_line(a6)
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+	sf.b	next_search_flag(a6)
+	bsr	scroll_sub
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	上へ1画面スクロール
+*
+*-----------------------------------------------
+back_page:
+	tst.l	now_line(a6)
+	beq	@f
+	movea.l	line_point(a6),a1
+	move.l	now_line(a6),d0
+	cmpi.l	#30,d0
+	bcs	top_page
+	subi.l	#30,d0
+	move.l	d0,now_line(a6)
+	lsl.l	#2,d0
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+	sf.b	bottom_page_flag(a6)
+	sf.b	next_search_flag(a6)
+	bsr	scroll_sub
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	最後の項まで進む
+*
+*-----------------------------------------------
+last_page:
+	tst.b	bottom_page_flag(a6)
+	bne	@f
+	move.l	line_limit(a6),d0
+	subi.l	#30-1,d0		*最終行から29行前
+	move.l	d0,now_line(a6)
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+	sf.b	next_search_flag(a6)
+	bsr	scroll_sub
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	最初の項へ戻る
+*
+*-----------------------------------------------
+top_page:
+	tst.l	now_line(a6)
+	beq	@f
+	clr.l	now_line(a6)
+	movea.l	file_point(a6),a1
+	bsr	display_text_all
+	sf.b	bottom_page_flag(a6)
+	sf.b	next_search_flag(a6)
+	bsr	scroll_sub
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	前方検索
+*
+*-----------------------------------------------
+new_search_front:
+	lea.l	m_search_front(pc),a2
+	bsr	display_window
+	moveq.l	#INPUT_LENGTH,d0
+	lea.l	input_buffer(a6),a0
+	bsr	key_input
+	bsr	hide_window
+	tst.l	d0
+	beq	new_search_front_exit
+	lea.l	input_buffer(a6),a0
+	lea.l	search_buffer(a6),a1
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+	sf.b	next_search_flag(a6)
+	bra	next_search_front
+new_search_front_exit:
+	bsr	exit_key_wait
+	rts
+
+
+*-----------------------------------------------
+*
+*	次の文字列を前方検索
+*
+*-----------------------------------------------
+next_search_front:
+	tst.b	search_buffer(a6)
+	beq	next_search_front_exit
+	bsr	print_searching
+	movea.l	search_point(a6),a1
+	tst.b	next_search_flag(a6)
+	beq	@f
+	move.l	now_line(a6),d0
+	move.l	found_line(a6),d1
+	sub.l	d0,d1
+	cmpi.l	#30,d1
+	bcc	@f			*検索文字が画面内にない
+	move.l	now_line(a6),d0
+	move.l	found_line_2(a6),d1
+	sub.l	d0,d1
+	beq	execute_search_front
+	bmi	execute_search_front
+@@:	move.l	now_line(a6),d0
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+execute_search_front:
+	lea.l	search_buffer(a6),a0
+	bsr	search_front
+	bmi	@f			*一致しなかった
+	st.b	next_search_flag(a6)	*次検索フラグをたてる
+	bsr	get_line
+	move.l	d0,found_line(a6)
+	bsr	set_next_search_point
+	bsr	goto_search_result_page
+	move.l	now_line(a6),found_line_2(a6)
+	bsr	scroll_sub
+	bsr	print_search_string
+	bsr	exit_key_wait
+	bra	next_search_front_exit
+@@:	bsr	print_no_match
+	bsr	exit_key_wait
+	movea.l	key_point(a6),a0
+	move.w	4(a0),d0
+	move.w	6(a0),d1
+	bsr	key_wait
+next_search_front_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	後方検索
+*
+*-----------------------------------------------
+new_search_back:
+	lea.l	m_search_back(pc),a2
+	bsr	display_window
+	moveq.l	#INPUT_LENGTH,d0
+	lea.l	input_buffer(a6),a0
+	bsr	key_input
+	bsr	hide_window
+	tst.l	d0
+	beq	new_search_back_exit
+	lea.l	input_buffer(a6),a0
+	lea.l	search_buffer(a6),a1
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+	sf.b	next_search_flag(a6)
+	bra	next_search_back
+new_search_back_exit:
+	bsr	exit_key_wait
+	rts
+
+
+*-----------------------------------------------
+*
+*	次の文字列を後方検索
+*
+*-----------------------------------------------
+next_search_back:
+	tst.b	search_buffer(a6)
+	beq	next_search_back_exit
+	bsr	print_searching
+	movea.l	search_point_2(a6),a1
+	tst.b	next_search_flag(a6)
+	beq	@f
+	move.l	now_line(a6),d0
+	move.l	found_line(a6),d1
+	sub.l	d0,d1
+	cmpi.l	#30,d1
+	bcc	@f			*検索文字が画面内にない
+	move.l	now_line(a6),d0
+	move.l	found_line_2(a6),d1
+	sub.l	d0,d1
+	bpl	execute_search_back
+@@:	move.l	now_line(a6),d0
+	addi.l	#30,d0
+	move.l	line_limit(a6),d1
+	cmp.l	d1,d0
+	bls	@f
+	movea.l	file_point(a6),a1
+	move.l	file_size(a6),d0
+	lea.l	(a1,d0.l),a1
+	bra	execute_search_back
+@@:	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+execute_search_back:
+	lea.l	search_buffer(a6),a0
+	bsr	search_back
+	bmi	@f			*一致しなかった
+	st.b	next_search_flag(a6)	*次検索フラグをたてる
+	bsr	get_line
+	move.l	d0,found_line(a6)
+	bsr	set_next_search_point
+	bsr	goto_search_result_page
+	move.l	now_line(a6),found_line_2(a6)
+	bsr	scroll_sub
+	bsr	print_search_string
+	bsr	exit_key_wait
+	bra	next_search_back_exit
+@@:	bsr	print_no_match
+	bsr	exit_key_wait
+	movea.l	key_point(a6),a0
+	move.w	4(a0),d0
+	move.w	6(a0),d1
+	bsr	key_wait
+next_search_back_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	次に検索するアドレスを設定
+*
+*	in : d0.l = 検索された文字列のある行
+*
+*-----------------------------------------------
+set_next_search_point:
+	movem.l	d0-d2/a0,-(sp)
+	move.l	d0,d1
+	addq.l	#1,d1
+	move.l	file_point(a6),d2
+	add.l	file_size(a6),d2
+	cmp.l	line_limit(a6),d1
+	bhi	@f
+	lsl.l	#2,d1
+	movea.l	line_point(a6),a0
+	move.l	(a0,d1.l),d2
+@@:	move.l	d2,search_point(a6)	*前方検索開始アドレス
+
+	move.l	d0,d1
+	lsl.l	#2,d1
+	movea.l	line_point(a6),a0
+	move.l	(a0,d1.l),d1
+	move.l	file_point(a6),d2
+	cmp.l	d1,d2
+	beq	@f
+	subq.l	#1,d1
+	move.l	d1,d2
+@@:	move.l	d2,search_point_2(a6)	*後方検索開始アドレス
+	movem.l	(sp)+,d0-d2/a0
+	rts
+
+
+*-----------------------------------------------
+*
+*	フラグを調べて検索文字列を書き直し
+*
+*-----------------------------------------------
+redraw_search_string:
+	movem.l	d0-d1/a0-a1,-(sp)
+	tst.w	redraw_search_flag(a6)
+	beq	@@f
+	tst.b	search_buffer(a6)
+	bne	@f			*検索文字列があった
+	bsr	clear_message_line
+	sf.b	redraw_search_flag(a6)
+	bra	@@f
+@@:	bsr	print_search_string
+	sf.b	redraw_search_flag(a6)
+@@:	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+
+
+*-----------------------------------------------
+*
+*	検索文字列を表示
+*
+*-----------------------------------------------
+print_search_string:
+	movem.l	d0-d1/a0-a1,-(sp)
+	bsr	clear_message_line
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0f802,a0
+	lea.l	m_search_string(pc),a1
+	bsr	display_text_color
+	lea.l	$e0f802+13,a0
+	lea.l	search_buffer(a6),a1
+	bsr	display_text_color
+	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+
+
+*-----------------------------------------------
+*
+*	'検索中...'の文字列を表示
+*
+*-----------------------------------------------
+print_searching:
+	movem.l	d0-d1/a0-a1,-(sp)
+	bsr	clear_message_line
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0f802,a0
+	lea.l	m_searching(pc),a1
+	bsr	display_text_color
+	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+
+
+*-----------------------------------------------
+*
+*	検索失敗の文字列を表示
+*
+*-----------------------------------------------
+print_no_match:
+	movem.l	d0-d1/a0-a1,-(sp)
+	bsr	clear_message_line
+	moveq.l	#1,d0
+	moveq.l	#2,d1
+	lea.l	$e0f802,a0
+	lea.l	m_no_match(pc),a1
+	bsr	display_text_color
+	st.b	redraw_search_flag(a6)
+	movem.l	(sp)+,d0-d1/a0-a1
+	rts
+
+
+*-----------------------------------------------
+*
+*	下のバー部分の文字列をクリア
+*
+*-----------------------------------------------
+clear_message_line:
+	move.w	$e8002a,-(sp)
+	move.w	#$0003,$e8002a
+	move.w	#$90_7c,d0
+	moveq.l	#4-1,d1
+	bsr	raster_copy
+	bsr	raster_copy_stop
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	一致した文字列がある行に画面を移す
+*
+*	in : d0.l = 一致した文字列がある行
+*
+*-----------------------------------------------
+goto_search_result_page:
+	sf.b	bottom_page_flag(a6)	*ここでフラグ解除
+	cmpi.l	#30-1,line_limit(a6)
+	bcs	result_top_page
+	cmpi.l	#30/2-1,d0
+	bcc	result_middle_page
+result_top_page:
+	move.l	d0,d1			*上
+	moveq.l	#0,d0
+	bra	display_result_page
+result_middle_page:
+	move.l	line_limit(a6),d1
+	sub.l	d0,d1
+	cmpi.l	#30/2,d1
+	bcs	result_bottom_page
+	subi.l	#30/2-1,d0		*中
+	moveq.l	#14,d1
+	bra	display_result_page
+result_bottom_page:
+	moveq.l	#30-1,d0		*下
+	sub.l	d1,d0
+	move.l	d0,d1
+	move.l	line_limit(a6),d0
+	subi.l	#30-1,d0
+display_result_page:
+	move.l	d0,now_line(a6)
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+
+	move.w	$e8002a,-(sp)
+	move.w	#$110,$e8002a
+	addq.w	#1,d1
+	lsl.l	#7,d1
+	lsl.l	#4,d1
+	lea.l	$e00000,a0
+	adda.l	d1,a0
+	lea.l	$780(a0),a0
+	moveq.l	#$ff,d0
+	moveq.l	#24/4-1,d1
+@@:	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	dbra	d1,@b
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	行指定
+*
+*-----------------------------------------------
+set_line_num:
+	tst.l	now_line(a6)		*行指定出来る状態か調べる
+	bne	@f
+	tst.w	bottom_page_flag(a6)
+	bne	set_line_num_exit
+@@:	lea.l	m_set_line_num(pc),a2
+	bsr	display_window		*文字入力ウインドウを表示
+	moveq.l	#10,d0			*半角10文字までキー入力
+	lea.l	input_buffer(a6),a0
+	bsr	key_input
+	bsr	hide_window
+	tst.l	d0
+	beq	set_line_num_exit	*入力文字数が0だった
+@@:	move.b	(a0)+,d0
+	beq	@f
+	subi.b	#'0',d0			*文字列が数字が調べる
+	cmpi.b	#9,d0
+	bls	@b
+	bra	set_line_num_exit
+@@:	lea.l	input_buffer(a6),a0
+	bsr	STOL
+	tst.l	d0
+	beq	set_line_num_exit	*0行を指定された
+	subq.l	#1,d0
+	move.l	line_limit(a6),d1
+	sub.l	d0,d1
+	bmi	set_line_num_exit
+	cmpi.l	#30,d1
+	bcc	@f
+	move.l	line_limit(a6),d0	*最後の項を表示
+	subi.l	#30-1,d0
+@@:	sf.b	bottom_page_flag(a6)	*ここへきたらフラグクリア
+	move.l	d0,now_line(a6)
+	lsl.l	#2,d0
+	movea.l	line_point(a6),a1
+	movea.l	(a1,d0.l),a1
+	bsr	display_text_all
+	bsr	scroll_sub
+set_line_num_exit:
+	bsr	exit_key_wait
+	rts
+
+
+*-----------------------------------------------
+*
+*	エディターの起動
+*
+*-----------------------------------------------
+exec_editor:
+	lea.l	editor_env_name(pc),a0
+	lea.l	etc_buffer(a6),a1
+	bsr	get_env
+	bmi	exec_editor_exit
+
+	lea.l	etc_buffer(a6),a1
+@@:	tst.b	(a1)+
+	bne	@b
+	subq.l	#1,a1
+
+	move.l	now_line(a6),d0
+	addi.l	#ED_LINE+1,d0		*行番号修正
+	lea.l	etc_buffer_2(a6),a0
+	bsr	LTOS
+	lea.l	etc_buffer_2(a6),a0
+@@:	move.b	(a0)+,d0
+	cmpi.b	#' ',d0
+	beq	@b
+	subq.l	#1,a0
+
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+	move.b	#' ',-1(a1)
+
+	lea.l	name_buffer(a6),a0
+@@:	move.b	(a0)+,(a1)+
+	bne	@b
+
+	bsr	prep_exit
+	bsr	to_user_mode
+	lea.l	etc_buffer(a6),a0
+	lea.l	etc_buffer_2(a6),a1
+	bsr	exec_file
+	bmi	@f
+	bsr	to_super_mode
+	bra	all_exit
+@@:	bsr	to_super_mode
+	bra	error_editor
+
+exec_editor_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	指定されたファイルを実行
+*
+*	in : a0.l = 起動するファイル名のアドレス
+*	in : a1.l = コマンドラインを指すアドレス
+*	out: d0.l = 負ならば起動失敗
+*
+*-----------------------------------------------
+exec_file:
+	movem.l	d1-d7/a0-a6,-(sp)
+
+	clr.l	-(sp)			*自分と同じ環境
+	move.l	a1,-(sp)
+	move.l	a0,-(sp)
+	move.w	#2,-(sp)		*PATHセット
+	DOS	_EXEC
+	lea.l	14(sp),sp
+	tst.l	d0
+	bmi	@f
+
+	clr.l	-(sp)
+	move.l	a1,-(sp)
+	move.l	a0,-(sp)
+	clr.w	-(sp)
+	DOS	_EXEC
+	lea.l	14(sp),sp
+	tst.l	d0
+
+@@:	movem.l	(sp)+,d1-d7/a0-a6
+	rts
+
+
+*-----------------------------------------------
+*
+*	スーパーバイザーモードへ移行
+*
+*-----------------------------------------------
+to_super_mode:
+	lea.l	super_flag(pc),a0
+	tst.w	(a0)
+	bne	@f
+	move.l	sp,d7			*スタックポイント保存
+	clr.l	-(sp)
+	DOS	_SUPER
+	addq.l	#4,sp
+	move.l	d0,ssp_work(a6)
+	move.l	d7,sp
+	st.b	(a0)
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	ユーザーモードへ移行
+*
+*-----------------------------------------------
+to_user_mode:
+	lea.l	super_flag(pc),a0
+	tst.w	(a0)
+	beq	@f
+	move.l	sp,d7
+	move.l	ssp_work(a6),-(sp)
+	DOS	_SUPER
+	addq.l	#4,sp
+	move.l	d7,sp
+	sf.b	(a0)
+@@:	rts
+
+
+*-----------------------------------------------
+*
+*	環境変数を読み出す
+*
+*	in : a0.l = 環境変数の名前
+*	in : a1.l = 環境変数の内容が返るバッファ
+*	in : d0.l = 負なら環境変数読みだし失敗
+*
+*-----------------------------------------------
+get_env:
+	move.l	a1,-(sp)
+	clr.l	-(sp)
+	move.l	a0,-(sp)
+	tst.w	human_flag(a6)
+	beq	@f
+	dc.w	$ff53			*HUMAN ver2.03以下用
+	bra	@@f
+@@:	dc.w	$ff53+$30		*_GETENV
+@@:	lea.l	12(sp),sp
+	tst.l	d0
+	rts
+
+
+*-----------------------------------------------
+*
+*	終了キーが離されるまで待つ
+*
+*-----------------------------------------------
+exit_key_wait:
+	move.w	#$800,d0		*ESC
+	moveq.l	#1,d1
+	bsr	key_wait
+	move.w	#$803,d0		*RETURN
+	moveq.l	#5,d1
+	bsr	key_wait
+	move.w	#$807,d0		*UNDO
+	moveq.l	#2,d1
+	bsr	key_wait
+	rts
+
+
+*-----------------------------------------------
+*
+*	テキスト全プレーンをクリア
+*
+*-----------------------------------------------
+all_text_clear:
+	move.w	$e8002a,-(sp)
+	move.w	#$0133,$e8002a
+	lea.l	$e00000,a0
+	moveq.l	#0,d0
+	moveq.l	#8*4-1,d1
+@@:	move.l	d0,(a0)+		*テキスト4line分をクリア
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	move.l	d0,(a0)+
+	dbra	d1,@b
+	moveq.l	#$00_01,d0
+	move.w	#256-1-1,d1
+	bsr	raster_copy		*ラスタコピーで後は消す
+	bsr	raster_copy_stop
+	move.w	(sp)+,$e8002a
+	rts
+
+
+*-----------------------------------------------
+*
+*	垂直帰線期間を待つ
+*
+*-----------------------------------------------
+vdisp_loop:
+	btst.b	#4,$e88001
+	beq	vdisp_loop
+@@:	btst.b	#4,$e88001
+	bne	@b
+	rts
+
+
+*-----------------------------------------------
+*
+*	エラー処理
+*
+*-----------------------------------------------
+error_aruzo:
+	pea.l	m_exist_process(pc)
+	bra	error_exit
+error_naizo:
+	pea.l	m_not_exist_process(pc)
+	bra	error_exit
+error_open_file:
+	pea.l	m_open_file(pc)
+	bra	error_exit
+error_read_file:
+	pea.l	m_read_file(pc)
+	bra	error_exit
+error_memory:
+	pea.l	m_memory(pc)
+	bra	error_exit
+error_line:
+	bsr	prep_exit
+	pea.l	m_memory(pc)
+	bra	error_exit
+error_editor:
+	pea.l	m_editor(pc)
+	bra	error_exit
+help:
+	pea.l	m_usage(pc)
+	bra	error_exit
+error_exit:
+	pea.l	m_name(pc)
+	DOS	_PRINT
+	addq.l	#4,sp
+	DOS	_PRINT
+	addq.l	#4,sp
+
+	bsr	to_user_mode
+	move.w	#-1,-(sp)
+	DOS	_EXIT2
+
+
+*-----------------------------------------------
+*
+*	文字列データ
+*
+*-----------------------------------------------
+m_name:
+	dc.b	"Text file viewer 'LOQUAT.R' version 1.03",13,10
+	dc.b	'Programmed by M.Taguchi',13,10,0
+m_usage:
+	dc.b	'使用法:LOQUAT -[switches] filename',13,10
+	dc.b	'	-P[str]	パレットの設定',13,10
+	dc.b	'	-N[num]	開始行番号の指定',13,10
+	dc.b	'	-L	ヒストリー常駐',13,10
+	dc.b	'	-R	ヒストリー解除',13,10
+	dc.b	'	-F[num]	行番号を記憶するファイル数(1～2048)',13,10
+	dc.b	'	-I	ヒストリーバッファ初期化',13,10,0
+m_open_file:
+	dc.b	'ファイルが見つかりません',13,10,0
+m_read_file:
+	dc.b	'ファイルが読めません',13,10,0
+m_memory:
+	dc.b	'メモリが足りません',13,10,0
+m_editor:
+	dc.b	'エディターが起動できませんでした',13,10,0
+m_keeppr:
+	dc.b	'常駐しました',13,10,0
+m_leave:
+	dc.b	'常駐解除しました',13,10,0
+m_exist_process:
+	dc.b	'既に常駐しています',13,10,0
+m_not_exist_process:
+	dc.b	'常駐していません',13,10,0
+m_init:
+	dc.b	'ヒストリーバッファ初期化しました',13,10,0
+m_wait:
+	dc.b	'行整理中です',0
+m_line:
+	dc.b	'Lines      /     ',0
+m_line_2:
+	dc.b	'     ',0
+m_loquat:
+	dc.b	'LOQUAT.R version 1.03',0
+m_bar_file:
+	dc.b	'<<                        >>',0
+m_bar_size:
+	dc.b	'Filesize           ',0
+m_set_line_num:
+	dc.b	'移動行番号 : ',0
+m_search_front:
+	dc.b	'前方検索文字列 : ',0
+m_search_back:
+	dc.b	'後方検索文字列 : ',0
+m_searching:
+	dc.b	'文字列検索中...',0
+m_search_string:
+	dc.b	'検索文字列 : ',0
+m_no_match:
+	dc.b	'文字列が見つかりません',0
+palette_env_name:
+	dc.b	'LOQ_COLOR',0
+editor_env_name:
+	dc.b	'LOQ_ED',0
+	.even
+super_flag:
+	dc.w	0
+a0_work:
+	ds.l	1
+work_point:
+	ds.l	1
+
+program_end:
+	.end	boot
+
+

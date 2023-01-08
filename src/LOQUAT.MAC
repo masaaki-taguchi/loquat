@@ -1,0 +1,103 @@
+*
+*	LOQUAT.R 共通定義ファイル 'LOQUAT.MAC'
+*
+
+.ifndef		_FNTADR
+_FNTADR		equ	$16
+.endif
+
+INPUT_LENGTH	equ	32		*文字入力できる最大文字数
+SEARCH_STR_NUM	equ	1		*記憶する文字列の数
+
+
+	.offset	0
+hist_search_str_buffer:	ds.b	(INPUT_LENGTH+1)*SEARCH_STR_NUM
+	.even
+HIST_STR_SIZE:
+
+	.offset	0
+hist_line_flag:		ds.w	1
+hist_line_number:	ds.l	1
+hist_line_check_sum:	ds.w	1
+hist_line_name_buffer:	ds.b	256
+HIST_LINE_SIZE:
+
+	.offset	2
+keep_loquat_header:	ds.b	6
+keep_loquat_vernum:	ds.w	1
+keep_now_search:	ds.w	1
+keep_over_write_search:	ds.w	1
+keep_file_number:	ds.w	1
+keep_over_write_line:	ds.w	1
+keep_buffer_point:	ds.l	1
+keep_buffer_point_2:	ds.l	1
+
+	.offset	0
+* sspのワーク
+ssp_work:		ds.l	1
+
+* 8*16フォントの格納ワーク
+font_816_buffer:	ds.b	4096	*テキストフォント
+
+* ファイル読み込みの時のワーク
+file_point:		ds.l	1
+file_size:		ds.l	1
+name_buffer:		ds.b	256
+nameck_buffer:		ds.b	92
+
+* ヒストリー関係のワーク
+keep_work_point:	ds.l	1
+hist_check_sum:	ds.w	1
+hist_file_name:	ds.b	256
+hist_line:		ds.l	1
+renewal_flag:		ds.w	1
+over_write_flag:	ds.w	1
+hist_write_point:	ds.l	1
+
+* テキストパレット関係のワーク
+user_palette_flag:	ds.w	1
+user_palette_buffer:	ds.w	4
+
+* 操作関係ワーク
+key_point:		ds.l	1
+key_command_work:	ds.w	1
+
+* スクロールの時に使うワーク
+line_point:		ds.l	1
+line_limit:		ds.l	1
+now_line:		ds.l	1	*現在のline数
+bottom_page_flag:	ds.w	1	*下へ進めるかのフラグ
+
+* 文字列入力関係のワーク
+box_parameter:		ds.w	6
+window_raster:		ds.w	1
+window_size:		ds.w	1
+input_buffer:		ds.b	INPUT_LENGTH+1
+	.even
+hanzen_buffer:		ds.b	INPUT_LENGTH	*半角か全角かを見分けるためのバッファ
+
+* 検索関係のワーク
+search_buffer:		ds.b	INPUT_LENGTH+1
+	.even
+search_point:		ds.l	1
+search_point_2:		ds.l	1	*後方検索の検索開始ポイント
+found_line:		ds.l	1
+found_line_2:		ds.l	1
+next_search_flag:	ds.w	1
+redraw_search_flag:	ds.w	1
+
+* その他のワーク
+keep_switch_flag:	ds.w	1
+human_flag:		ds.w	1
+user_line:		ds.l	1
+user_hist_file_number:	ds.w	1
+etc_buffer:		ds.b	256	*汎用バッファ
+etc_buffer_2:		ds.b	256
+
+* 16*16フォントの格納ワーク
+font_1616_buffer:	ds.b	58368
+
+WORK_SIZE:
+	.text
+
+

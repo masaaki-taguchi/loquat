@@ -1,0 +1,48 @@
+*
+*	ラスタコピールーチン 'RASTER_COPY.HAS'
+*
+
+	.xdef	raster_copy
+	.xdef	raster_copy_stop
+
+
+*-----------------------------------------------
+*
+*	ラスタコピー実行
+*
+*	in : d0.w = $e8002cに書き込む値
+*	in : d1.w = ラスタコピーする回数-1
+*
+*-----------------------------------------------
+raster_copy:
+	move.w	sr,-(sp)
+	ori.w	#$0700,sr
+@@:	tst.b	$e88001
+	bmi	@b
+@@:	tst.b	$e88001
+	bpl	@b
+	move.w	d0,$e8002c
+	bset.b	#3,$e80481
+	addi.w	#$0101,d0
+	dbra	d1,@@b
+	move.w	(sp)+,sr
+	rts
+
+
+*-----------------------------------------------
+*
+*	ラスタコピー終了
+*
+*-----------------------------------------------
+raster_copy_stop:
+	move.w	sr,-(sp)
+	ori.w	#$0700,sr
+@@:	tst.b	$e88001
+	bmi	@b
+@@:	tst.b	$e88001
+	bpl	@b
+	bclr.b	#3,$e80481
+	move.w	(sp)+,sr
+	rts
+
+

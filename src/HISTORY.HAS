@@ -1,0 +1,183 @@
+*
+*	ヒストリー関係のルーチン 'HISTORY.HAS'
+*
+
+	.include	loquat.mac
+
+	.xref	keep_check
+	.xdef	read_history
+	.xdef	write_history
+
+
+*-----------------------------------------------
+*
+*	ヒストリーの読み込み
+*
+*-----------------------------------------------
+read_history:
+	bsr	keep_check
+	bmi	read_history_exit
+	lea.l	$100(a0),a0
+	move.l	a0,keep_work_point(a6)
+
+	move.l	keep_buffer_point(a0),a1
+	lea.l	search_buffer(a6),a2
+	moveq.l	#INPUT_LENGTH-1,d0
+@@:	move.b	(a1)+,(a2)+
+	dbra	d0,@b
+	clr.b	(a2)
+
+	lea.l	nameck_buffer(a6),a0
+	movea.l	a0,a1
+	lea.l	etc_buffer(a6),a2
+	move.b	(a1)+,(a2)+		*ドライブ名コピー
+	move.b	(a1)+,(a2)+
+@@:	move.b	(a1)+,(a2)+		*パス名コピー
+	bne	@b
+	subq.l	#1,a2
+	lea.l	67(a0),a1
+@@:	move.b	(a1)+,(a2)+		*ファイルネームコピー
+	bne	@b
+	subq.l	#1,a2
+	lea.l	86(a0),a1
+@@:	move.b	(a1)+,(a2)+		*拡張子コピー
+	bne	@b
+
+	lea.l	etc_buffer(a6),a0
+	lea.l	hist_file_name(a6),a1
+	bsr	to_lower_case		*小文字に変換
+
+	lea.l	hist_file_name(a6),a0
+	moveq.l	#0,d0
+	moveq.l	#0,d1
+@@:	move.b	(a0)+,d0
+	beq	@f
+	add.w	d0,d1			*チェックサム計算
+	bra	@b
+@@:	move.w	d1,hist_check_sum(a6)
+
+search_name:
+	movea.l	keep_work_point(a6),a0
+	move.w	hist_check_sum(a6),d0
+	move.w	keep_file_number(a0),d1
+	moveq.l	#0,d2
+	move.l	keep_buffer_point_2(a0),a0
+	lea.l	-HIST_LINE_SIZE(a0),a0
+search_name_loop:
+	lea.l	HIST_LINE_SIZE(a0),a0
+	cmp.w	d1,d2
+	bhi	history_over_write
+	addq.w	#1,d2
+	tst.w	hist_line_flag(a0)
+	beq	history_new_name
+	cmp.w	hist_line_check_sum(a0),d0
+	bne	search_name_loop
+	lea.l	hist_file_name(a6),a1
+	lea.l	hist_line_name_buffer(a0),a2
+@@:	move.b	(a1)+,d3
+	beq	@f
+	cmp.b	(a2)+,d3
+	beq	@b
+	bra	search_name_loop
+@@:	tst.b	(a2)
+	bne	search_name_loop
+
+	move.l	a0,hist_write_point(a6)
+	move.l	hist_line_number(a0),hist_line(a6)
+	st.b	renewal_flag(a6)
+	bra	read_history_exit
+
+history_new_name:
+	move.l	a0,hist_write_point(a6)
+	st.b	hist_line_flag(a0)
+	bra	read_history_exit
+history_over_write:
+	move.l	keep_work_point(a6),a0
+	move.w	keep_over_write_line(a0),d0
+	move.l	keep_buffer_point_2(a0),a1
+	mulu.w	#HIST_LINE_SIZE,d0
+	lea.l	(a1,d0.l),a1
+	move.l	a1,hist_write_point(a6)
+
+	move.w	keep_file_number(a0),d0
+	move.w	keep_over_write_line(a0),d1
+	addq.w	#1,d1
+	cmp.w	d0,d1
+	bls	@f
+	moveq.l	#0,d1
+@@:	move.w	d1,keep_over_write_line(a0)
+	st.b	over_write_flag(a6)
+	bra	read_history_exit
+
+read_history_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	ヒストリーの書き込み
+*
+*-----------------------------------------------
+write_history:
+	tst.l	keep_work_point(a6)
+	beq	write_history_exit
+	move.l	keep_work_point(a6),a0
+
+	lea.l	search_buffer(a6),a1
+	move.l	keep_buffer_point(a0),a2
+	moveq.l	#INPUT_LENGTH-1,d0
+@@:	move.b	(a1)+,(a2)+
+	dbra	d0,@b
+	clr.b	(a2)
+
+	move.l	hist_write_point(a6),a1
+	move.l	now_line(a6),d0
+	bne	@f
+	tst.w	over_write_flag(a6)
+	bne	write_history_exit
+	clr.w	hist_line_flag(a1)
+	bra	write_history_exit
+
+@@:	move.l	d0,hist_line_number(a1)
+	tst.w	renewal_flag(a6)
+	bne	write_history_exit
+	lea.l	hist_file_name(a6),a2
+	lea.l	hist_line_name_buffer(a1),a3
+@@:	move.b	(a2)+,(a3)+
+	bne	@b
+	move.w	hist_check_sum(a6),hist_line_check_sum(a1)
+
+write_history_exit:
+	rts
+
+
+*-----------------------------------------------
+*
+*	文字列に含まれる半角大文字を小文字に変換
+*
+*	in : a0.l = 変換する文字列
+*	in : a1.l = 変換後の文字列のバッファ
+*
+*-----------------------------------------------
+to_lower_case:
+	move.b	(a0)+,d0
+	beq	to_lower_case_exit
+	bpl	@@f
+	cmpi.b	#$a0,d0
+	bcs	@f
+	cmpi.b	#$e0,d0
+	bcs	@@f
+@@:	move.b	d0,(a1)+
+	move.b	(a0)+,(a1)+
+	bra	to_lower_case
+@@:	cmpi.b	#'A',d0
+	bcs	@f
+	cmpi.b	#'Z',d0
+	bhi	@f
+	ori.b	#$20,d0
+@@:	move.b	d0,(a1)+
+	bra	to_lower_case
+to_lower_case_exit:
+	rts
+
+
