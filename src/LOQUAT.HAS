@@ -6,7 +6,7 @@
 	.include	doscall.mac
 	.include	loquat.mac
 
-LOQUAT_VERNUM	equ	$0103
+LOQUAT_VERNUM	equ	$0104
 ED_LINE		equ	14		*エディターを起動するときの行番号修正値
 WAIT_TIME	equ	12		*キーウエイト値
 DEF_HIST_NUM	equ	16-1
@@ -256,7 +256,7 @@ get_user_hist_file:
 
 init_history_buffer:
 	bsr	keep_check
-	bmi	error_naizo
+	bmi	error_not_exist_process
 	lea.l	$100(a0),a0
 
 	clr.w	keep_now_search(a0)
@@ -294,7 +294,7 @@ init_history_buffer:
 *-----------------------------------------------
 process_keep:
 	bsr	keep_check
-	beq	error_aruzo
+	beq	error_exist_process
 
 	lea.l	entrance_keep_part(pc),a0
 
@@ -351,7 +351,7 @@ process_keep:
 *-----------------------------------------------
 process_leave:
 	bsr	keep_check
-	bmi	error_naizo
+	bmi	error_not_exist_process
 
 	move.l	$100+keep_buffer_point(a0),-(sp)
 	DOS	_MFREE
@@ -887,7 +887,7 @@ command_table:
 *
 *-----------------------------------------------
 scroll_sub:
-	bsr	print_line
+	bsr	display_line
 	tst.b	next_search_flag(a6)
 	beq	@f
 	move.l	found_line(a6),d0
@@ -903,7 +903,7 @@ scroll_sub:
 *	現在の行数を表示
 *
 *-----------------------------------------------
-print_line:
+display_line:
 	move.l	now_line(a6),d0
 	addq.l	#1,d0			*1行から始まるように見せる
 	lea.l	etc_buffer(a6),a0
@@ -1219,7 +1219,7 @@ new_search_front_exit:
 next_search_front:
 	tst.b	search_buffer(a6)
 	beq	next_search_front_exit
-	bsr	print_searching
+	bsr	display_searching
 	movea.l	search_point(a6),a1
 	tst.b	next_search_flag(a6)
 	beq	@f
@@ -1248,10 +1248,10 @@ execute_search_front:
 	bsr	goto_search_result_page
 	move.l	now_line(a6),found_line_2(a6)
 	bsr	scroll_sub
-	bsr	print_search_string
+	bsr	display_search_string
 	bsr	exit_key_wait
 	bra	next_search_front_exit
-@@:	bsr	print_no_match
+@@:	bsr	display_no_match
 	bsr	exit_key_wait
 	movea.l	key_point(a6),a0
 	move.w	4(a0),d0
@@ -1294,7 +1294,7 @@ new_search_back_exit:
 next_search_back:
 	tst.b	search_buffer(a6)
 	beq	next_search_back_exit
-	bsr	print_searching
+	bsr	display_searching
 	movea.l	search_point_2(a6),a1
 	tst.b	next_search_flag(a6)
 	beq	@f
@@ -1330,10 +1330,10 @@ execute_search_back:
 	bsr	goto_search_result_page
 	move.l	now_line(a6),found_line_2(a6)
 	bsr	scroll_sub
-	bsr	print_search_string
+	bsr	display_search_string
 	bsr	exit_key_wait
 	bra	next_search_back_exit
-@@:	bsr	print_no_match
+@@:	bsr	display_no_match
 	bsr	exit_key_wait
 	movea.l	key_point(a6),a0
 	move.w	4(a0),d0
@@ -1351,7 +1351,7 @@ next_search_back_exit:
 *
 *-----------------------------------------------
 set_next_search_point:
-	movem.l	d0-d2/a0,-(sp)
+	movem.l	d0-d2/a0-a1,-(sp)
 	move.l	d0,d1
 	addq.l	#1,d1
 	move.l	file_point(a6),d2
@@ -1373,7 +1373,7 @@ set_next_search_point:
 	subq.l	#1,d1
 	move.l	d1,d2
 @@:	move.l	d2,search_point_2(a6)	*後方検索開始アドレス
-	movem.l	(sp)+,d0-d2/a0
+	movem.l	(sp)+,d0-d2/a0-a1
 	rts
 
 
@@ -1391,7 +1391,7 @@ redraw_search_string:
 	bsr	clear_message_line
 	sf.b	redraw_search_flag(a6)
 	bra	@@f
-@@:	bsr	print_search_string
+@@:	bsr	display_search_string
 	sf.b	redraw_search_flag(a6)
 @@:	movem.l	(sp)+,d0-d1/a0-a1
 	rts
@@ -1402,7 +1402,7 @@ redraw_search_string:
 *	検索文字列を表示
 *
 *-----------------------------------------------
-print_search_string:
+display_search_string:
 	movem.l	d0-d1/a0-a1,-(sp)
 	bsr	clear_message_line
 	moveq.l	#1,d0
@@ -1422,7 +1422,7 @@ print_search_string:
 *	'検索中...'の文字列を表示
 *
 *-----------------------------------------------
-print_searching:
+display_searching:
 	movem.l	d0-d1/a0-a1,-(sp)
 	bsr	clear_message_line
 	moveq.l	#1,d0
@@ -1439,7 +1439,7 @@ print_searching:
 *	検索失敗の文字列を表示
 *
 *-----------------------------------------------
-print_no_match:
+display_no_match:
 	movem.l	d0-d1/a0-a1,-(sp)
 	bsr	clear_message_line
 	moveq.l	#1,d0
@@ -1775,10 +1775,10 @@ vdisp_loop:
 *	エラー処理
 *
 *-----------------------------------------------
-error_aruzo:
+error_exist_process:
 	pea.l	m_exist_process(pc)
 	bra	error_exit
-error_naizo:
+error_not_exist_process:
 	pea.l	m_not_exist_process(pc)
 	bra	error_exit
 error_open_file:
@@ -1818,7 +1818,7 @@ error_exit:
 *
 *-----------------------------------------------
 m_name:
-	dc.b	"Text file viewer 'LOQUAT.R' version 1.03",13,10
+	dc.b	"Text file viewer 'LOQUAT.R' version 1.04",13,10
 	dc.b	'Programmed by M.Taguchi',13,10,0
 m_usage:
 	dc.b	'使用法:LOQUAT -[switches] filename',13,10
@@ -1853,7 +1853,7 @@ m_line:
 m_line_2:
 	dc.b	'     ',0
 m_loquat:
-	dc.b	'LOQUAT.R version 1.03',0
+	dc.b	'LOQUAT.R version 1.04',0
 m_bar_file:
 	dc.b	'<<                        >>',0
 m_bar_size:

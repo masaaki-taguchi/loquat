@@ -36,6 +36,23 @@ display_text_all:
 *	in : a0.l = 書き込むテキストのアドレス
 *	in : a1.l = 表示したいデータがあるアドレス
 *
+*	各レジスタの使用状況
+*	d0 : 本ルーチンの入力と、サブルーチン/IOCS呼び出し時の入力に使用
+*	d1 : ラスタコピールーチンの入力と、テキストコードの格納先に使用
+*	d2 : IOCS _FNTADR呼び出し時に使用
+*	d3 : 文字コード別のルーチン呼び出し時のインデックスに使用(下位16bitのみ使用)
+*	d4 : 出力行数のカウンタに使用(下位16bitのみ使用)
+*	d5 : ラスタコピー位置のカウンタに使用(下位16bitのみ使用)
+*	d6 : タブ出力時の出力位置補正のためのAND値に使用(下位16bitのみ使用)
+*	d7 : 1行の最大横幅(96文字)のカウンタに使用
+*	a0 : 文字出力先のテキストVRAMアドレス
+*	a1 : 出力元の文字が格納されたテキストのアドレス
+*	a2 : 文字出力先の行先頭のテキストVRAMアドレス
+*	a3 : フォント格納先アドレス
+*	a4 : 文字出力毎の戻り先のアドレス
+*	a5 : 文字毎のジャンプテーブルのアドレス
+*	a6 : 本プログラムのワーク領域を指すアドレス
+*
 *-----------------------------------------------
 display_text:
 	movem.l	d0-d7/a0-a6,-(sp)
@@ -50,7 +67,7 @@ display_text:
 	moveq.l	#$f8,d6			*andの値
 	lea.l	-2048(a0),a2
 	lea.l	display_text_loop_2(pc),a4
-	lea.l	string_jump_table(pc),a5
+	lea.l	char_jump_table(pc),a5
 display_text_loop:
 	lea.l	2048(a2),a2
 	movea.l	a2,a0
@@ -64,7 +81,7 @@ display_text_loop_2:
 	move.b	(a1)+,d1
 	move.b	d1,d3
 	move.b	(a5,d3.w),d3
-	jmp	string_routine(pc,d3.w)
+	jmp	char_routine(pc,d3.w)
 next_display_text:
 	dbra	d4,display_text_loop
 display_text_exit:
@@ -78,12 +95,12 @@ display_text_exit:
 *	文字コード別のルーチン
 *
 *-----------------------------------------------
-string_routine:
+char_routine:
 @@:
-string_1a:
+char_1a:
 	st.b	bottom_page_flag(a6)	*$1aに当たったらフラグをあげる
 	bra	display_text_exit
-string_09:
+char_09:
 	addq.b	#8,d7
 	ble	1f
 	cmpi.b	#8,d7
@@ -93,21 +110,39 @@ string_09:
 1:	and.b	d6,d7			*8の倍数の数字に
 	lea.l	96(a2,d7.w),a0
 	jmp	(a4)
-string_0d:
+char_0d:
 	cmpi.b	#$0a,(a1)+
 	beq	next_display_text
 	subq.l	#1,a1
-string_0a:
+char_0a:
 	bra	next_display_text
-string_hankaku:
+char_hankaku:
 	addq.b	#1,d7
 	ble	2f
 	subq.l	#1,a1
 	bra	next_display_text
-2:	bsr	put_816
+2:	andi.w	#$ff,d1
+	lsl.w	#4,d1
+	lea.l	font_816_buffer(a6,d1.w),a3
+	move.b	(a3)+,(a0)+
+	move.b	(a3)+,128*1-1(a0)
+	move.b	(a3)+,128*2-1(a0)
+	move.b	(a3)+,128*3-1(a0)
+	move.b	(a3)+,128*4-1(a0)
+	move.b	(a3)+,128*5-1(a0)
+	move.b	(a3)+,128*6-1(a0)
+	move.b	(a3)+,128*7-1(a0)
+	move.b	(a3)+,128*8-1(a0)
+	move.b	(a3)+,128*9-1(a0)
+	move.b	(a3)+,128*10-1(a0)
+	move.b	(a3)+,128*11-1(a0)
+	move.b	(a3)+,128*12-1(a0)
+	move.b	(a3)+,128*13-1(a0)
+	move.b	(a3)+,128*14-1(a0)
+	move.b	(a3)+,128*15-1(a0)
 	jmp	(a4)
-string_hankaku_2:
-	addq.b	#1,d7
+char_hankaku_2:
+	addq.b	#1,d7			*2byte半角文字の出力
 	ble	3f
 	subq.l	#1,a1
 	bra	next_display_text
@@ -117,9 +152,24 @@ string_hankaku_2:
 	moveq.l	#8,d2
 	IOCS	_FNTADR
 	move.l	d0,a3
-	bsr	put_816_trans		*2byte半角文字を書き出す
+	move.b	(a3)+,(a0)+
+	move.b	(a3)+,128*1-1(a0)
+	move.b	(a3)+,128*2-1(a0)
+	move.b	(a3)+,128*3-1(a0)
+	move.b	(a3)+,128*4-1(a0)
+	move.b	(a3)+,128*5-1(a0)
+	move.b	(a3)+,128*6-1(a0)
+	move.b	(a3)+,128*7-1(a0)
+	move.b	(a3)+,128*8-1(a0)
+	move.b	(a3)+,128*9-1(a0)
+	move.b	(a3)+,128*10-1(a0)
+	move.b	(a3)+,128*11-1(a0)
+	move.b	(a3)+,128*12-1(a0)
+	move.b	(a3)+,128*13-1(a0)
+	move.b	(a3)+,128*14-1(a0)
+	move.b	(a3)+,128*15-1(a0)
 	jmp	(a4)
-string_zenkaku:
+char_zenkaku:
 	addq.b	#2,d7
 	ble	4f
 	subq.l	#1,a1
@@ -127,9 +177,8 @@ string_zenkaku:
 4:	move.b	d1,-(sp)
 	move.w	(sp)+,d1
 	move.b	(a1)+,d1
-	bsr	put_1616
-	jmp	(a4)
-string_zenkaku_2:
+	bra	char_zenkaku_put_1616
+char_zenkaku_2:
 	addq.b	#2,d7
 	ble	5f
 	subq.l	#1,a1
@@ -141,267 +190,324 @@ string_zenkaku_2:
 	lsl.w	#5,d1
 	lea.l	font_1616_buffer(a6),a3
 	adda.w	d1,a3
-	bsr	put_1616_trans
+	bra	char_zenkaku_put_1616_trans
+
+char_jump_table:
+	dc.b	char_hankaku-@b		*$00
+	dc.b	char_hankaku-@b		*$01
+	dc.b	char_hankaku-@b		*$02
+	dc.b	char_hankaku-@b		*$03
+	dc.b	char_hankaku-@b		*$04
+	dc.b	char_hankaku-@b		*$05
+	dc.b	char_hankaku-@b		*$06
+	dc.b	char_hankaku-@b		*$07
+	dc.b	char_hankaku-@b		*$08
+	dc.b	char_09-@b		*$09
+	dc.b	char_0a-@b		*$0a
+	dc.b	char_hankaku-@b		*$0b
+	dc.b	char_hankaku-@b		*$0c
+	dc.b	char_0d-@b		*$0d
+	dc.b	char_hankaku-@b		*$0e
+	dc.b	char_hankaku-@b		*$0f
+	dc.b	char_hankaku-@b		*$10
+	dc.b	char_hankaku-@b		*$11
+	dc.b	char_hankaku-@b		*$12
+	dc.b	char_hankaku-@b		*$13
+	dc.b	char_hankaku-@b		*$14
+	dc.b	char_hankaku-@b		*$15
+	dc.b	char_hankaku-@b		*$16
+	dc.b	char_hankaku-@b		*$17
+	dc.b	char_hankaku-@b		*$18
+	dc.b	char_hankaku-@b		*$19
+	dc.b	char_1a-@b		*$1a
+	dc.b	char_hankaku-@b		*$1b
+	dc.b	char_hankaku-@b		*$1c
+	dc.b	char_hankaku-@b		*$1d
+	dc.b	char_hankaku-@b		*$1e
+	dc.b	char_hankaku-@b		*$1f
+	dc.b	char_hankaku-@b		*$20
+	dc.b	char_hankaku-@b		*$21
+	dc.b	char_hankaku-@b		*$22
+	dc.b	char_hankaku-@b		*$23
+	dc.b	char_hankaku-@b		*$24
+	dc.b	char_hankaku-@b		*$25
+	dc.b	char_hankaku-@b		*$26
+	dc.b	char_hankaku-@b		*$27
+	dc.b	char_hankaku-@b		*$28
+	dc.b	char_hankaku-@b		*$29
+	dc.b	char_hankaku-@b		*$2a
+	dc.b	char_hankaku-@b		*$2b
+	dc.b	char_hankaku-@b		*$2c
+	dc.b	char_hankaku-@b		*$2d
+	dc.b	char_hankaku-@b		*$2e
+	dc.b	char_hankaku-@b		*$2f
+	dc.b	char_hankaku-@b		*$30
+	dc.b	char_hankaku-@b		*$31
+	dc.b	char_hankaku-@b		*$32
+	dc.b	char_hankaku-@b		*$33
+	dc.b	char_hankaku-@b		*$34
+	dc.b	char_hankaku-@b		*$35
+	dc.b	char_hankaku-@b		*$36
+	dc.b	char_hankaku-@b		*$37
+	dc.b	char_hankaku-@b		*$38
+	dc.b	char_hankaku-@b		*$39
+	dc.b	char_hankaku-@b		*$3a
+	dc.b	char_hankaku-@b		*$3b
+	dc.b	char_hankaku-@b		*$3c
+	dc.b	char_hankaku-@b		*$3d
+	dc.b	char_hankaku-@b		*$3e
+	dc.b	char_hankaku-@b		*$3f
+	dc.b	char_hankaku-@b		*$40
+	dc.b	char_hankaku-@b		*$41
+	dc.b	char_hankaku-@b		*$42
+	dc.b	char_hankaku-@b		*$43
+	dc.b	char_hankaku-@b		*$44
+	dc.b	char_hankaku-@b		*$45
+	dc.b	char_hankaku-@b		*$46
+	dc.b	char_hankaku-@b		*$47
+	dc.b	char_hankaku-@b		*$48
+	dc.b	char_hankaku-@b		*$49
+	dc.b	char_hankaku-@b		*$4a
+	dc.b	char_hankaku-@b		*$4b
+	dc.b	char_hankaku-@b		*$4c
+	dc.b	char_hankaku-@b		*$4d
+	dc.b	char_hankaku-@b		*$4e
+	dc.b	char_hankaku-@b		*$4f
+	dc.b	char_hankaku-@b		*$50
+	dc.b	char_hankaku-@b		*$51
+	dc.b	char_hankaku-@b		*$52
+	dc.b	char_hankaku-@b		*$53
+	dc.b	char_hankaku-@b		*$54
+	dc.b	char_hankaku-@b		*$55
+	dc.b	char_hankaku-@b		*$56
+	dc.b	char_hankaku-@b		*$57
+	dc.b	char_hankaku-@b		*$58
+	dc.b	char_hankaku-@b		*$59
+	dc.b	char_hankaku-@b		*$5a
+	dc.b	char_hankaku-@b		*$5b
+	dc.b	char_hankaku-@b		*$5c
+	dc.b	char_hankaku-@b		*$5d
+	dc.b	char_hankaku-@b		*$5e
+	dc.b	char_hankaku-@b		*$5f
+	dc.b	char_hankaku-@b		*$60
+	dc.b	char_hankaku-@b		*$61
+	dc.b	char_hankaku-@b		*$62
+	dc.b	char_hankaku-@b		*$63
+	dc.b	char_hankaku-@b		*$64
+	dc.b	char_hankaku-@b		*$65
+	dc.b	char_hankaku-@b		*$66
+	dc.b	char_hankaku-@b		*$67
+	dc.b	char_hankaku-@b		*$68
+	dc.b	char_hankaku-@b		*$69
+	dc.b	char_hankaku-@b		*$6a
+	dc.b	char_hankaku-@b		*$6b
+	dc.b	char_hankaku-@b		*$6c
+	dc.b	char_hankaku-@b		*$6d
+	dc.b	char_hankaku-@b		*$6e
+	dc.b	char_hankaku-@b		*$6f
+	dc.b	char_hankaku-@b		*$70
+	dc.b	char_hankaku-@b		*$71
+	dc.b	char_hankaku-@b		*$72
+	dc.b	char_hankaku-@b		*$73
+	dc.b	char_hankaku-@b		*$74
+	dc.b	char_hankaku-@b		*$75
+	dc.b	char_hankaku-@b		*$76
+	dc.b	char_hankaku-@b		*$77
+	dc.b	char_hankaku-@b		*$78
+	dc.b	char_hankaku-@b		*$79
+	dc.b	char_hankaku-@b		*$7a
+	dc.b	char_hankaku-@b		*$7b
+	dc.b	char_hankaku-@b		*$7c
+	dc.b	char_hankaku-@b		*$7d
+	dc.b	char_hankaku-@b		*$7e
+	dc.b	char_hankaku-@b		*$7f
+	dc.b	char_hankaku_2-@b	*$80
+	dc.b	char_zenkaku_2-@b	*$81
+	dc.b	char_zenkaku_2-@b	*$82
+	dc.b	char_zenkaku_2-@b	*$83
+	dc.b	char_zenkaku_2-@b	*$84
+	dc.b	char_zenkaku-@b		*$85
+	dc.b	char_zenkaku-@b		*$86
+	dc.b	char_zenkaku-@b		*$87
+	dc.b	char_zenkaku-@b		*$88
+	dc.b	char_zenkaku-@b		*$89
+	dc.b	char_zenkaku-@b		*$8a
+	dc.b	char_zenkaku-@b		*$8b
+	dc.b	char_zenkaku-@b		*$8c
+	dc.b	char_zenkaku-@b		*$8d
+	dc.b	char_zenkaku-@b		*$8e
+	dc.b	char_zenkaku-@b		*$8f
+	dc.b	char_zenkaku-@b		*$90
+	dc.b	char_zenkaku-@b		*$91
+	dc.b	char_zenkaku-@b		*$92
+	dc.b	char_zenkaku-@b		*$93
+	dc.b	char_zenkaku-@b		*$94
+	dc.b	char_zenkaku-@b		*$95
+	dc.b	char_zenkaku-@b		*$96
+	dc.b	char_zenkaku-@b		*$97
+	dc.b	char_zenkaku-@b		*$98
+	dc.b	char_zenkaku-@b		*$99
+	dc.b	char_zenkaku-@b		*$9a
+	dc.b	char_zenkaku-@b		*$9b
+	dc.b	char_zenkaku-@b		*$9c
+	dc.b	char_zenkaku-@b		*$9d
+	dc.b	char_zenkaku-@b		*$9e
+	dc.b	char_zenkaku-@b		*$9f
+	dc.b	char_hankaku-@b		*$a0
+	dc.b	char_hankaku-@b		*$a1
+	dc.b	char_hankaku-@b		*$a2
+	dc.b	char_hankaku-@b		*$a3
+	dc.b	char_hankaku-@b		*$a4
+	dc.b	char_hankaku-@b		*$a5
+	dc.b	char_hankaku-@b		*$a6
+	dc.b	char_hankaku-@b		*$a7
+	dc.b	char_hankaku-@b		*$a8
+	dc.b	char_hankaku-@b		*$a9
+	dc.b	char_hankaku-@b		*$aa
+	dc.b	char_hankaku-@b		*$ab
+	dc.b	char_hankaku-@b		*$ac
+	dc.b	char_hankaku-@b		*$ad
+	dc.b	char_hankaku-@b		*$ae
+	dc.b	char_hankaku-@b		*$af
+	dc.b	char_hankaku-@b		*$b0
+	dc.b	char_hankaku-@b		*$b1
+	dc.b	char_hankaku-@b		*$b2
+	dc.b	char_hankaku-@b		*$b3
+	dc.b	char_hankaku-@b		*$b4
+	dc.b	char_hankaku-@b		*$b5
+	dc.b	char_hankaku-@b		*$b6
+	dc.b	char_hankaku-@b		*$b7
+	dc.b	char_hankaku-@b		*$b8
+	dc.b	char_hankaku-@b		*$b9
+	dc.b	char_hankaku-@b		*$ba
+	dc.b	char_hankaku-@b		*$bb
+	dc.b	char_hankaku-@b		*$bc
+	dc.b	char_hankaku-@b		*$bd
+	dc.b	char_hankaku-@b		*$be
+	dc.b	char_hankaku-@b		*$bf
+	dc.b	char_hankaku-@b		*$c0
+	dc.b	char_hankaku-@b		*$c1
+	dc.b	char_hankaku-@b		*$c2
+	dc.b	char_hankaku-@b		*$c3
+	dc.b	char_hankaku-@b		*$c4
+	dc.b	char_hankaku-@b		*$c5
+	dc.b	char_hankaku-@b		*$c6
+	dc.b	char_hankaku-@b		*$c7
+	dc.b	char_hankaku-@b		*$c8
+	dc.b	char_hankaku-@b		*$c9
+	dc.b	char_hankaku-@b		*$ca
+	dc.b	char_hankaku-@b		*$cb
+	dc.b	char_hankaku-@b		*$cc
+	dc.b	char_hankaku-@b		*$cd
+	dc.b	char_hankaku-@b		*$ce
+	dc.b	char_hankaku-@b		*$cf
+	dc.b	char_hankaku-@b		*$d0
+	dc.b	char_hankaku-@b		*$d1
+	dc.b	char_hankaku-@b		*$d2
+	dc.b	char_hankaku-@b		*$d3
+	dc.b	char_hankaku-@b		*$d4
+	dc.b	char_hankaku-@b		*$d5
+	dc.b	char_hankaku-@b		*$d6
+	dc.b	char_hankaku-@b		*$d7
+	dc.b	char_hankaku-@b		*$d8
+	dc.b	char_hankaku-@b		*$d9
+	dc.b	char_hankaku-@b		*$da
+	dc.b	char_hankaku-@b		*$db
+	dc.b	char_hankaku-@b		*$dc
+	dc.b	char_hankaku-@b		*$dd
+	dc.b	char_hankaku-@b		*$de
+	dc.b	char_hankaku-@b		*$df
+	dc.b	char_zenkaku-@b		*$e0
+	dc.b	char_zenkaku-@b		*$e1
+	dc.b	char_zenkaku-@b		*$e2
+	dc.b	char_zenkaku-@b		*$e3
+	dc.b	char_zenkaku-@b		*$e4
+	dc.b	char_zenkaku-@b		*$e5
+	dc.b	char_zenkaku-@b		*$e6
+	dc.b	char_zenkaku-@b		*$e7
+	dc.b	char_zenkaku-@b		*$e8
+	dc.b	char_zenkaku-@b		*$e9
+	dc.b	char_zenkaku-@b		*$ea
+	dc.b	char_zenkaku-@b		*$eb
+	dc.b	char_zenkaku-@b		*$ec
+	dc.b	char_zenkaku-@b		*$ed
+	dc.b	char_zenkaku-@b		*$ee
+	dc.b	char_zenkaku-@b		*$ef
+	dc.b	char_hankaku_2-@b	*$f0
+	dc.b	char_hankaku_2-@b	*$f1
+	dc.b	char_hankaku_2-@b	*$f2
+	dc.b	char_hankaku_2-@b	*$f3
+	dc.b	char_hankaku_2-@b	*$f4
+	dc.b	char_hankaku_2-@b	*$f5
+	dc.b	char_hankaku_2-@b	*$f6
+	dc.b	char_hankaku_2-@b	*$f7
+	dc.b	char_hankaku_2-@b	*$f8
+	dc.b	char_hankaku_2-@b	*$f9
+	dc.b	char_hankaku_2-@b	*$fa
+	dc.b	char_hankaku_2-@b	*$fb
+	dc.b	char_hankaku_2-@b	*$fc
+	dc.b	char_hankaku_2-@b	*$fd
+	dc.b	char_hankaku_2-@b	*$fe
+	dc.b	char_hankaku_2-@b	*$ff
+
+char_zenkaku_put_1616:
+	moveq.l	#8,d2
+	IOCS	_FNTADR
+	movea.l	d0,a3
+char_zenkaku_put_1616_trans:
+	move.l	a0,d0
+	ror.b	#1,d0
+	bcc	@f			*テキストアドレスが偶数の場合
+	move.b	(a3)+,(a0)+
+	move.b	(a3)+,(a0)+
+	move.b	(a3)+,128*1-2(a0)
+	move.b	(a3)+,128*1+1-2(a0)
+	move.b	(a3)+,128*2-2(a0)
+	move.b	(a3)+,128*2+1-2(a0)
+	move.b	(a3)+,128*3-2(a0)
+	move.b	(a3)+,128*3+1-2(a0)
+	move.b	(a3)+,128*4-2(a0)
+	move.b	(a3)+,128*4+1-2(a0)
+	move.b	(a3)+,128*5-2(a0)
+	move.b	(a3)+,128*5+1-2(a0)
+	move.b	(a3)+,128*6-2(a0)
+	move.b	(a3)+,128*6+1-2(a0)
+	move.b	(a3)+,128*7-2(a0)
+	move.b	(a3)+,128*7+1-2(a0)
+	move.b	(a3)+,128*8-2(a0)
+	move.b	(a3)+,128*8+1-2(a0)
+	move.b	(a3)+,128*9-2(a0)
+	move.b	(a3)+,128*9+1-2(a0)
+	move.b	(a3)+,128*10-2(a0)
+	move.b	(a3)+,128*10+1-2(a0)
+	move.b	(a3)+,128*11-2(a0)
+	move.b	(a3)+,128*11+1-2(a0)
+	move.b	(a3)+,128*12-2(a0)
+	move.b	(a3)+,128*12+1-2(a0)
+	move.b	(a3)+,128*13-2(a0)
+	move.b	(a3)+,128*13+1-2(a0)
+	move.b	(a3)+,128*14-2(a0)
+	move.b	(a3)+,128*14+1-2(a0)
+	move.b	(a3)+,128*15-2(a0)
+	move.b	(a3)+,128*15+1-2(a0)
 	jmp	(a4)
-
-string_jump_table:
-	dc.b	string_hankaku-@b	*$00
-	dc.b	string_hankaku-@b	*$01
-	dc.b	string_hankaku-@b	*$02
-	dc.b	string_hankaku-@b	*$03
-	dc.b	string_hankaku-@b	*$04
-	dc.b	string_hankaku-@b	*$05
-	dc.b	string_hankaku-@b	*$06
-	dc.b	string_hankaku-@b	*$07
-	dc.b	string_hankaku-@b	*$08
-	dc.b	string_09-@b		*$09
-	dc.b	string_0a-@b		*$0a
-	dc.b	string_hankaku-@b	*$0b
-	dc.b	string_hankaku-@b	*$0c
-	dc.b	string_0d-@b		*$0d
-	dc.b	string_hankaku-@b	*$0e
-	dc.b	string_hankaku-@b	*$0f
-	dc.b	string_hankaku-@b	*$10
-	dc.b	string_hankaku-@b	*$11
-	dc.b	string_hankaku-@b	*$12
-	dc.b	string_hankaku-@b	*$13
-	dc.b	string_hankaku-@b	*$14
-	dc.b	string_hankaku-@b	*$15
-	dc.b	string_hankaku-@b	*$16
-	dc.b	string_hankaku-@b	*$17
-	dc.b	string_hankaku-@b	*$18
-	dc.b	string_hankaku-@b	*$19
-	dc.b	string_1a-@b		*$1a
-	dc.b	string_hankaku-@b	*$1b
-	dc.b	string_hankaku-@b	*$1c
-	dc.b	string_hankaku-@b	*$1d
-	dc.b	string_hankaku-@b	*$1e
-	dc.b	string_hankaku-@b	*$1f
-	dc.b	string_hankaku-@b	*$20
-	dc.b	string_hankaku-@b	*$21
-	dc.b	string_hankaku-@b	*$22
-	dc.b	string_hankaku-@b	*$23
-	dc.b	string_hankaku-@b	*$24
-	dc.b	string_hankaku-@b	*$25
-	dc.b	string_hankaku-@b	*$26
-	dc.b	string_hankaku-@b	*$27
-	dc.b	string_hankaku-@b	*$28
-	dc.b	string_hankaku-@b	*$29
-	dc.b	string_hankaku-@b	*$2a
-	dc.b	string_hankaku-@b	*$2b
-	dc.b	string_hankaku-@b	*$2c
-	dc.b	string_hankaku-@b	*$2d
-	dc.b	string_hankaku-@b	*$2e
-	dc.b	string_hankaku-@b	*$2f
-	dc.b	string_hankaku-@b	*$30
-	dc.b	string_hankaku-@b	*$31
-	dc.b	string_hankaku-@b	*$32
-	dc.b	string_hankaku-@b	*$33
-	dc.b	string_hankaku-@b	*$34
-	dc.b	string_hankaku-@b	*$35
-	dc.b	string_hankaku-@b	*$36
-	dc.b	string_hankaku-@b	*$37
-	dc.b	string_hankaku-@b	*$38
-	dc.b	string_hankaku-@b	*$39
-	dc.b	string_hankaku-@b	*$3a
-	dc.b	string_hankaku-@b	*$3b
-	dc.b	string_hankaku-@b	*$3c
-	dc.b	string_hankaku-@b	*$3d
-	dc.b	string_hankaku-@b	*$3e
-	dc.b	string_hankaku-@b	*$3f
-	dc.b	string_hankaku-@b	*$40
-	dc.b	string_hankaku-@b	*$41
-	dc.b	string_hankaku-@b	*$42
-	dc.b	string_hankaku-@b	*$43
-	dc.b	string_hankaku-@b	*$44
-	dc.b	string_hankaku-@b	*$45
-	dc.b	string_hankaku-@b	*$46
-	dc.b	string_hankaku-@b	*$47
-	dc.b	string_hankaku-@b	*$48
-	dc.b	string_hankaku-@b	*$49
-	dc.b	string_hankaku-@b	*$4a
-	dc.b	string_hankaku-@b	*$4b
-	dc.b	string_hankaku-@b	*$4c
-	dc.b	string_hankaku-@b	*$4d
-	dc.b	string_hankaku-@b	*$4e
-	dc.b	string_hankaku-@b	*$4f
-	dc.b	string_hankaku-@b	*$50
-	dc.b	string_hankaku-@b	*$51
-	dc.b	string_hankaku-@b	*$52
-	dc.b	string_hankaku-@b	*$53
-	dc.b	string_hankaku-@b	*$54
-	dc.b	string_hankaku-@b	*$55
-	dc.b	string_hankaku-@b	*$56
-	dc.b	string_hankaku-@b	*$57
-	dc.b	string_hankaku-@b	*$58
-	dc.b	string_hankaku-@b	*$59
-	dc.b	string_hankaku-@b	*$5a
-	dc.b	string_hankaku-@b	*$5b
-	dc.b	string_hankaku-@b	*$5c
-	dc.b	string_hankaku-@b	*$5d
-	dc.b	string_hankaku-@b	*$5e
-	dc.b	string_hankaku-@b	*$5f
-	dc.b	string_hankaku-@b	*$60
-	dc.b	string_hankaku-@b	*$61
-	dc.b	string_hankaku-@b	*$62
-	dc.b	string_hankaku-@b	*$63
-	dc.b	string_hankaku-@b	*$64
-	dc.b	string_hankaku-@b	*$65
-	dc.b	string_hankaku-@b	*$66
-	dc.b	string_hankaku-@b	*$67
-	dc.b	string_hankaku-@b	*$68
-	dc.b	string_hankaku-@b	*$69
-	dc.b	string_hankaku-@b	*$6a
-	dc.b	string_hankaku-@b	*$6b
-	dc.b	string_hankaku-@b	*$6c
-	dc.b	string_hankaku-@b	*$6d
-	dc.b	string_hankaku-@b	*$6e
-	dc.b	string_hankaku-@b	*$6f
-	dc.b	string_hankaku-@b	*$70
-	dc.b	string_hankaku-@b	*$71
-	dc.b	string_hankaku-@b	*$72
-	dc.b	string_hankaku-@b	*$73
-	dc.b	string_hankaku-@b	*$74
-	dc.b	string_hankaku-@b	*$75
-	dc.b	string_hankaku-@b	*$76
-	dc.b	string_hankaku-@b	*$77
-	dc.b	string_hankaku-@b	*$78
-	dc.b	string_hankaku-@b	*$79
-	dc.b	string_hankaku-@b	*$7a
-	dc.b	string_hankaku-@b	*$7b
-	dc.b	string_hankaku-@b	*$7c
-	dc.b	string_hankaku-@b	*$7d
-	dc.b	string_hankaku-@b	*$7e
-	dc.b	string_hankaku-@b	*$7f
-	dc.b	string_hankaku_2-@b	*$80
-	dc.b	string_zenkaku_2-@b	*$81
-	dc.b	string_zenkaku_2-@b	*$82
-	dc.b	string_zenkaku_2-@b	*$83
-	dc.b	string_zenkaku_2-@b	*$84
-	dc.b	string_zenkaku-@b	*$85
-	dc.b	string_zenkaku-@b	*$86
-	dc.b	string_zenkaku-@b	*$87
-	dc.b	string_zenkaku-@b	*$88
-	dc.b	string_zenkaku-@b	*$89
-	dc.b	string_zenkaku-@b	*$8a
-	dc.b	string_zenkaku-@b	*$8b
-	dc.b	string_zenkaku-@b	*$8c
-	dc.b	string_zenkaku-@b	*$8d
-	dc.b	string_zenkaku-@b	*$8e
-	dc.b	string_zenkaku-@b	*$8f
-	dc.b	string_zenkaku-@b	*$90
-	dc.b	string_zenkaku-@b	*$91
-	dc.b	string_zenkaku-@b	*$92
-	dc.b	string_zenkaku-@b	*$93
-	dc.b	string_zenkaku-@b	*$94
-	dc.b	string_zenkaku-@b	*$95
-	dc.b	string_zenkaku-@b	*$96
-	dc.b	string_zenkaku-@b	*$97
-	dc.b	string_zenkaku-@b	*$98
-	dc.b	string_zenkaku-@b	*$99
-	dc.b	string_zenkaku-@b	*$9a
-	dc.b	string_zenkaku-@b	*$9b
-	dc.b	string_zenkaku-@b	*$9c
-	dc.b	string_zenkaku-@b	*$9d
-	dc.b	string_zenkaku-@b	*$9e
-	dc.b	string_zenkaku-@b	*$9f
-	dc.b	string_hankaku-@b	*$a0
-	dc.b	string_hankaku-@b	*$a1
-	dc.b	string_hankaku-@b	*$a2
-	dc.b	string_hankaku-@b	*$a3
-	dc.b	string_hankaku-@b	*$a4
-	dc.b	string_hankaku-@b	*$a5
-	dc.b	string_hankaku-@b	*$a6
-	dc.b	string_hankaku-@b	*$a7
-	dc.b	string_hankaku-@b	*$a8
-	dc.b	string_hankaku-@b	*$a9
-	dc.b	string_hankaku-@b	*$aa
-	dc.b	string_hankaku-@b	*$ab
-	dc.b	string_hankaku-@b	*$ac
-	dc.b	string_hankaku-@b	*$ad
-	dc.b	string_hankaku-@b	*$ae
-	dc.b	string_hankaku-@b	*$af
-	dc.b	string_hankaku-@b	*$b0
-	dc.b	string_hankaku-@b	*$b1
-	dc.b	string_hankaku-@b	*$b2
-	dc.b	string_hankaku-@b	*$b3
-	dc.b	string_hankaku-@b	*$b4
-	dc.b	string_hankaku-@b	*$b5
-	dc.b	string_hankaku-@b	*$b6
-	dc.b	string_hankaku-@b	*$b7
-	dc.b	string_hankaku-@b	*$b8
-	dc.b	string_hankaku-@b	*$b9
-	dc.b	string_hankaku-@b	*$ba
-	dc.b	string_hankaku-@b	*$bb
-	dc.b	string_hankaku-@b	*$bc
-	dc.b	string_hankaku-@b	*$bd
-	dc.b	string_hankaku-@b	*$be
-	dc.b	string_hankaku-@b	*$bf
-	dc.b	string_hankaku-@b	*$c0
-	dc.b	string_hankaku-@b	*$c1
-	dc.b	string_hankaku-@b	*$c2
-	dc.b	string_hankaku-@b	*$c3
-	dc.b	string_hankaku-@b	*$c4
-	dc.b	string_hankaku-@b	*$c5
-	dc.b	string_hankaku-@b	*$c6
-	dc.b	string_hankaku-@b	*$c7
-	dc.b	string_hankaku-@b	*$c8
-	dc.b	string_hankaku-@b	*$c9
-	dc.b	string_hankaku-@b	*$ca
-	dc.b	string_hankaku-@b	*$cb
-	dc.b	string_hankaku-@b	*$cc
-	dc.b	string_hankaku-@b	*$cd
-	dc.b	string_hankaku-@b	*$ce
-	dc.b	string_hankaku-@b	*$cf
-	dc.b	string_hankaku-@b	*$d0
-	dc.b	string_hankaku-@b	*$d1
-	dc.b	string_hankaku-@b	*$d2
-	dc.b	string_hankaku-@b	*$d3
-	dc.b	string_hankaku-@b	*$d4
-	dc.b	string_hankaku-@b	*$d5
-	dc.b	string_hankaku-@b	*$d6
-	dc.b	string_hankaku-@b	*$d7
-	dc.b	string_hankaku-@b	*$d8
-	dc.b	string_hankaku-@b	*$d9
-	dc.b	string_hankaku-@b	*$da
-	dc.b	string_hankaku-@b	*$db
-	dc.b	string_hankaku-@b	*$dc
-	dc.b	string_hankaku-@b	*$dd
-	dc.b	string_hankaku-@b	*$de
-	dc.b	string_hankaku-@b	*$df
-	dc.b	string_zenkaku-@b	*$e0
-	dc.b	string_zenkaku-@b	*$e1
-	dc.b	string_zenkaku-@b	*$e2
-	dc.b	string_zenkaku-@b	*$e3
-	dc.b	string_zenkaku-@b	*$e4
-	dc.b	string_zenkaku-@b	*$e5
-	dc.b	string_zenkaku-@b	*$e6
-	dc.b	string_zenkaku-@b	*$e7
-	dc.b	string_zenkaku-@b	*$e8
-	dc.b	string_zenkaku-@b	*$e9
-	dc.b	string_zenkaku-@b	*$ea
-	dc.b	string_zenkaku-@b	*$eb
-	dc.b	string_zenkaku-@b	*$ec
-	dc.b	string_zenkaku-@b	*$ed
-	dc.b	string_zenkaku-@b	*$ee
-	dc.b	string_zenkaku-@b	*$ef
-	dc.b	string_hankaku_2-@b	*$f0
-	dc.b	string_hankaku_2-@b	*$f1
-	dc.b	string_hankaku_2-@b	*$f2
-	dc.b	string_hankaku_2-@b	*$f3
-	dc.b	string_hankaku_2-@b	*$f4
-	dc.b	string_hankaku_2-@b	*$f5
-	dc.b	string_hankaku_2-@b	*$f6
-	dc.b	string_hankaku_2-@b	*$f7
-	dc.b	string_hankaku_2-@b	*$f8
-	dc.b	string_hankaku_2-@b	*$f9
-	dc.b	string_hankaku_2-@b	*$fa
-	dc.b	string_hankaku_2-@b	*$fb
-	dc.b	string_hankaku_2-@b	*$fc
-	dc.b	string_hankaku_2-@b	*$fd
-	dc.b	string_hankaku_2-@b	*$fe
-	dc.b	string_hankaku_2-@b	*$ff
-
+@@:	move.w	(a3)+,(a0)+
+	move.w	(a3)+,128*1-2(a0)
+	move.w	(a3)+,128*2-2(a0)
+	move.w	(a3)+,128*3-2(a0)
+	move.w	(a3)+,128*4-2(a0)
+	move.w	(a3)+,128*5-2(a0)
+	move.w	(a3)+,128*6-2(a0)
+	move.w	(a3)+,128*7-2(a0)
+	move.w	(a3)+,128*8-2(a0)
+	move.w	(a3)+,128*9-2(a0)
+	move.w	(a3)+,128*10-2(a0)
+	move.w	(a3)+,128*11-2(a0)
+	move.w	(a3)+,128*12-2(a0)
+	move.w	(a3)+,128*13-2(a0)
+	move.w	(a3)+,128*14-2(a0)
+	move.w	(a3)+,128*15-2(a0)
+	jmp	(a4)
 
 *-----------------------------------------------
 *
