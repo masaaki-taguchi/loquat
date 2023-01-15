@@ -1,2 +1,3 @@
-*.has linguist-language=Assembly
-*.mac linguist-language=Assembly
+src/* linguist-vendored=false
+*.HAS linguist-language=Assembly
+*.MAC linguist-language=Assembly
